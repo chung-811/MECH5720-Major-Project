@@ -52,3 +52,25 @@ We will build: A coded illumination rig using a monitor displaying black/white s
 while the global shutter camera and rolling shutter camera hold one continuous exposure, so the target’s motion is
 convolved with a broadband code instead of a simple box blur. This will be tested primarily with a spinning fan
 controlled via a stepper motor, so that the speed can be controlled and recorded.
+
+## Simulation (Blender)
+
+Sharp sub-frames from Blender, coded light and rolling shutter applied in numpy, then deblurred.
+Blender's own shutter curve and rolling shutter are not used: the curve leaks about 10% of the
+light into off chips, and its rolling shutter squeezes the whole code into every row instead of
+giving each row its own slice of one flashing monitor.
+
+```
+uv sync
+blender -b -P blender/render_fan.py -- --rpm 2 --t_end 0.9 --dt 0.0041667 --out renders/fan.npz
+uv run python demo.py renders/fan.npz
+```
+
+| File | What |
+| --- | --- |
+| `blender/render_fan.py` | fan as sharp linear frames at t = (k + 0.5) dt, plus the t = 0 reference |
+| `flutter.py` | monitor code, row exposure weights, sensor noise, polar unwrap, ring deblur, blind speed |
+| `demo.py` | GS per-frame vs RS per-frame vs RS per-row, constant light, short exposure, speed estimate |
+
+One solver serves all three methods; they differ only in which exposure window each polar sample
+gets. Fan geometry and sensor noise numbers are placeholders until the fan and cameras are measured.
