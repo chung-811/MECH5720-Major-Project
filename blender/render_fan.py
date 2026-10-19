@@ -10,7 +10,6 @@ import numpy as np
 # one blade seen close up, hub above the frame. metres. placeholders until the fan is designed
 R0, R1 = 0.030, 0.080             # blade inner and outer edge from the rotation centre
 W0, W1 = 0.015, 0.030             # blade width at R0 (narrow end, toward the hub) and at R1
-LETTERS, TEXT_H = "ABC", 0.008    # stacked down the blade
 VIEW_H = 0.055                    # frame height: the 50 mm blade roughly fills it
 WHITE, BLACK = 0.8, 0.03
 
@@ -22,6 +21,8 @@ ap.add_argument("--width", type=int, default=728)    # half the IMX296 1456 x 10
 ap.add_argument("--height", type=int, default=544)
 ap.add_argument("--steps_per_rev", type=float, default=0, help="0 = smooth, 2038 = 28BYJ-48 full steps")
 ap.add_argument("--texture", default="", help="grey image printed on the blade, values taken as albedo")
+ap.add_argument("--text", default="A,B,C", help="lines of characters stacked down the blade, comma separated")
+ap.add_argument("--text_h", type=float, default=0.008, help="character height, m")
 ap.add_argument("--out", default="renders/blade.npz")
 a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
 
@@ -55,13 +56,15 @@ blade = bpy.data.objects.new("blade", me)
 s.collection.objects.link(blade)
 blade.parent = hub
 
-for i, ch in enumerate(LETTERS):
+lines = a.text.split(",")
+radii = [R0 + (R1 - R0) * (i + 1) / (len(lines) + 1) for i in range(len(lines))]
+for i, (line, rad) in enumerate(zip(lines, radii)):
     txt = bpy.data.curves.new(f"t{i}", "FONT")
-    txt.body, txt.size = ch, TEXT_H
+    txt.body, txt.size = line, a.text_h
     txt.align_x, txt.align_y = "CENTER", "CENTER"
     txt.materials.append(mat(BLACK))
     t = bpy.data.objects.new(f"t{i}", txt)
-    t.location = (0, -(R0 + (R1 - R0) * (i + 1) / (len(LETTERS) + 1)), 0.001)
+    t.location = (0, -rad, 0.001)
     s.collection.objects.link(t)
     t.parent = hub
 
@@ -111,6 +114,6 @@ hub_rc = (a.height / 2 - 0.5 - (R0 + R1) / 2 / p, a.width / 2 - 0.5)   # pixel c
 out = Path(a.out)
 out.parent.mkdir(parents=True, exist_ok=True)
 np.savez(out, frames=frames, t=t, dt=a.dt, omega=omega, ref=render(0.0), hub=hub_rc, px_m=p,
-         r0_px=R0 / p, r1_px=R1 / p, half_angle=max(math.atan2(W0 / 2, R0), math.atan2(W1 / 2, R1)))
+         r0_px=R0 / p, r1_px=R1 / p, text=a.text, text_r_px=np.array(radii) / p, text_h_px=a.text_h / p, half_angle=max(math.atan2(W0 / 2, R0), math.atan2(W1 / 2, R1)))
 print(f"{len(t)} frames {a.width}x{a.height}, {1e-3 / p:.1f} px/mm, {a.rpm} rpm, "
       f"outer edge {R1 * omega * a.dt / p:.2f} px per frame -> {out}")

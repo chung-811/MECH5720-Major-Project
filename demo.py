@@ -62,10 +62,10 @@ print("\nDPIR PSNR by band of sensor lines (first read -> last read)")
 for name in list(res)[:3]:
     print(f"{name:24s} " + " ".join(f"{v:5.1f}" for v in F.bands(s, res[name])))
 
-# criterion 3: blind speed from the GS coded capture, every 6th ring
+# criterion 3: blind speed from the GS coded capture, DPIR residual on a band of rings
 P, lines = F.unwrap(s, caps["GS coded"])
 omegas = om * np.linspace(0.8, 1.2, 21)
-est, sc = F.speed(P[::6], lines[::6], t, dt, coded, Tc, omegas, s.dth, lams["GS coded, per-frame"])
+est, sc = F.speed(s, P, lines, coded, Tc, omegas)
 print(f"\nblind speed: true {om * 60 / (2 * np.pi):.3f} rpm, estimate {est * 60 / (2 * np.pi):.3f} rpm "
       f"({100 * (est / om - 1):+.1f}%)")
 
@@ -79,7 +79,7 @@ plt.tight_layout()
 plt.savefig(out / "demo.png", dpi=90)
 fig, a = plt.subplots(figsize=(5, 3))
 a.plot(omegas / om, sc, "o-"), a.axvline(1, color="k", lw=0.5)
-a.set_xlabel("candidate / true speed"), a.set_ylabel("negative light fraction")
+a.set_xlabel("candidate / true speed"), a.set_ylabel("DPIR data residual")
 plt.tight_layout()
 plt.savefig(out / "speed.png", dpi=90)
 print(f"figures in {out}/")

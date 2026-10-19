@@ -78,6 +78,10 @@ uv run python coding_gain.py renders/blade_tex.npz renders/blade_tex_0.7.npz ren
 # across columns (camera on its side), 0 = down rows
 uv run python rows.py renders/blade.npz 1
 
+# criterion 2: OCR legibility against fan speed (tesseract on the PATH)
+for p in 0.35:0.0083333 0.7:0.0041667 1.4:0.0020833 2.8:0.0010417; do blender -b -P blender/render_fan.py -- --text K7R,MX4,PAT,H9W,3EV,NJ6 --text_h 0.005 --rpm ${p%%:*} --dt ${p##*:} --out renders/ocr_${p%%:*}.npz; done
+uv run python legibility.py renders/ocr_0.35.npz renders/ocr_0.7.npz renders/ocr_1.4.npz renders/ocr_2.8.npz
+
 # robustness: finer sub-frames, smooth and 28BYJ-48 stepped
 blender -b -P blender/render_fan.py -- --dt 0.0020833 --out renders/blade480.npz
 blender -b -P blender/render_fan.py -- --dt 0.0020833 --steps_per_rev 2038 --out renders/blade480_steps.npz
@@ -93,6 +97,9 @@ display only after deblurring.
 | `flutter.py` | monitor code, line exposure weights, sensor noise, arc unwrap about the hub, deblur, blind speed |
 | `demo.py` | GS per-frame vs RS per-frame vs RS per-row, constant light, short exposure, speed estimate |
 | `coding_gain.py` | coded vs constant light vs denoised short exposure, over blur length and light level |
+| `ocr.py` | tesseract per printed line, fraction of characters read correctly (edit distance) |
+| `legibility.py` | criterion 2: legibility of coded, constant and short captures against fan speed and light |
+| `real.py` | real captures: DNG loading, hub from two stepped stills, monitor waveform from a blade edge |
 | `rows.py` | GS vs RS per-frame vs RS per-row by band of sensor lines, 52/31/15-chip codes, three readouts |
 | `robust.py` | PSNR cost of black level, LCD lag, code timing, hub error, stepper motion |
 
@@ -118,3 +125,25 @@ the blur is long or the light is low: at 25 px of blur in full light constant li
 
 One solver serves all three methods; they differ only in which exposure window each polar sample
 gets. Blade geometry and sensor noise numbers are placeholders until the fan and cameras are measured.
+
+## Capturing on the rig
+
+What the simulation says the real captures need, and the Lab 4 lessons:
+
+1. Dark room, black backdrop, manual exposure and gain (no auto anything), DNG only. Log every file
+   with its condition as it is taken, and check clipping (under 0.1% of photosites at white) before
+   leaving the lab.
+2. Dark frames: 10 with the lens capped, at the capture exposure and gain.
+3. Hub: fan stopped, constant light, one still; step the motor 100 full steps (about 18 deg; at least
+   30), second still. `real.find_hub(a, b, steps * 2 * pi / steps_per_rev, guess, r, th)`. Count the
+   real steps per revolution once (28BYJ-48: about 2038, not 2048). In simulation a 4 deg turn found the
+   hub to 0.4 px, and the deblur tolerates 5 px.
+4. Reference: a sharp still of the stopped blade, the ground truth for PSNR and OCR.
+5. Monitor: 10 coded captures of a plain blade (nothing printed within the smear of its leading edge)
+   at about 2.8 rpm, the code and exposure used for the real captures. `real.kernel_from_edge` on their
+   mean, then `real.fit_monitor`. In simulation this recovered 80% of the 2.1 dB lost to a 3% black
+   level and a 3 ms LCD lag; one frame recovered none of it.
+6. Captures: at least 10 per speed per condition (coded, constant, one-chip short), one monitor
+   brightness throughout, commanded rpm recorded.
+7. Rolling shutter: record the sensor mode (`picam2.camera_configuration()["raw"]`), readout direction
+   and line time. Deblur in raw sensor orientation; on the green sublattice a line is two sensor lines.
