@@ -16,8 +16,8 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"                 # Win
 Then, in this folder:
 
 ```
-uv sync          # about 1 GB of packages (PyTorch, CPU only), a minute or two
-uv run pytest    # 17 checks, under a minute; the first run downloads the 131 MB DRUNet weights
+uv sync          # about 1 GB of packages (PyTorch, CPU only), about 2 minutes the first time
+uv run pytest    # 17 checks, about a minute; the first run downloads the 131 MB DRUNet weights
 ```
 
 If the tests pass, the pipeline works on your machine. Optional extras: Blender 5.2 for new renders,
