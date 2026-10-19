@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import rawpy
 from scipy.optimize import minimize
@@ -23,6 +25,15 @@ def load_dng(path):
         return img
     r, c = next((r, c) for r in range(2) for c in range(2) if desc[colours[r, c]] == "G")   # G and G2 differ
     return img[r::2, c::2]
+
+
+def run_log(path):
+    """(code, chip, t_exp) from the JSON that software/illumination/coded_illumination.py writes next to
+    each DNG. chip is total_duration_s / bits there, not one refresh: pass it to F.light(..., chip=chip)"""
+    with open(path) as f:
+        d = json.load(f)
+    code = "".join(map(str, d["sequence_played"]))
+    return code, d["params"]["bit_duration_s"], d["actual_exposure_us"] / 1e6
 
 
 def mean_frames(paths):
@@ -67,20 +78,20 @@ def kernel_from_edge(img, hub, r, th, omega, t, window=9):
     return L / np.percentile(L[L > 0], 99)
 
 
-def fit_monitor(L, t, dt, code):
+def fit_monitor(L, t, dt, code, chip=F.CHIP):
     """(black, tau, t0), L_model: the designed code through a black level, a first-order LCD lag tau and a
     timing offset t0, fitted to a measured waveform L on the uniform grid t. Three numbers are far better
     determined by a noisy measurement than the waveform itself. lcd is linear and keeps constants, so
     the model is black + (1 - black) lcd(code): linear in black, grid search over tau and t0"""
-    inside = t < len(code) * F.CHIP
+    inside = t < len(code) * chip
     best = None
-    for t0 in np.linspace(-0.5, 0.5, 21) * F.CHIP:
+    for t0 in np.linspace(-0.5, 0.5, 21) * chip:
         for tau in np.geomspace(2e-4, 1e-2, 25):
-            c = F.lcd(F.light(t, code, t0=t0), dt, tau)
+            c = F.lcd(F.light(t, code, chip, t0=t0), dt, tau)
             a = (1 - c)[inside]
             black = float(np.clip(a @ (L - c)[inside] / (a @ a), 0, 0.5))
             err = np.sum((black * (1 - c) + c - L)[inside] ** 2)
             if best is None or err < best[0]:
                 best = (err, black, tau, t0)
     _, black, tau, t0 = best
-    return (black, tau, t0), F.lcd(F.light(t, code, black=black, t0=t0), dt, tau)
+    return (black, tau, t0), F.lcd(F.light(t, code, chip, black=black, t0=t0), dt, tau)
