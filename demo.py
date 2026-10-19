@@ -56,13 +56,9 @@ res[short] = F.cartesian(F.polar(caps["GS short"] / F.CHIP, c, r, n)[0], c, r, s
 print(f"{short:24s}            PSNR {F.score(s, res[short])[0]:5.2f} dB")
 
 # criterion 1: PSNR per band of rows, top to bottom
-edges = np.linspace(0, H, BANDS + 1).astype(int)
 print("\nPSNR by row band (top -> bottom)")
 for name in list(res)[:3]:
-    m = s.mask
-    vals = [psnr(s.truth[a:b][m[a:b]], res[name][a:b][m[a:b]], data_range=1) if m[a:b].any() else np.nan
-            for a, b in zip(edges[:-1], edges[1:])]
-    print(f"{name:24s} " + " ".join(f"{v:5.1f}" for v in vals))
+    print(f"{name:24s} " + " ".join(f"{v:5.1f}" for v in F.bands(s, res[name], BANDS)))
 
 # criterion 3: blind speed from the GS coded capture, every 6th ring
 P, rows = F.polar(caps["GS coded"], c, r, n)

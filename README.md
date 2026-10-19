@@ -69,13 +69,21 @@ uv run python demo.py renders/fan.npz
 blender -b -P blender/render_fan.py -- --rpm 2 --t_end 0.9 --dt 0.0020833 --out renders/fan480.npz
 blender -b -P blender/render_fan.py -- --rpm 2 --t_end 0.9 --dt 0.0020833 --steps_per_rev 2038 --out renders/fan480_steps.npz
 uv run python robust.py renders/fan480.npz renders/fan480_steps.npz
+
+# criterion 1: per-row vs per-frame over code length and OV5647 readout
+blender -b -P blender/render_fan.py -- --rpm 2 --t_end 0.95 --dt 0.0041667 --out renders/fan_long.npz
+uv run python rows.py renders/fan_long.npz
 ```
+
+Process captures in raw sensor orientation: the per-row timing follows sensor rows, so rotate for
+display only after deblurring.
 
 | File | What |
 | --- | --- |
 | `blender/render_fan.py` | fan as sharp linear frames at t = (k + 0.5) dt, plus the t = 0 reference |
 | `flutter.py` | monitor code, row exposure weights, sensor noise, polar unwrap, ring deblur, blind speed |
 | `demo.py` | GS per-frame vs RS per-frame vs RS per-row, constant light, short exposure, speed estimate |
+| `rows.py` | GS vs RS per-frame vs RS per-row by row band, for 52/31/15-chip codes and three readouts |
 | `robust.py` | PSNR cost of black level, LCD lag, code timing, hub centre error, stepper motion |
 
 One solver serves all three methods; they differ only in which exposure window each polar sample

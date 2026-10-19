@@ -144,6 +144,13 @@ def capture(s, L, t_exp, flux, rng, t_line=0.0, gain=1.0, **noise):
     return sensor(expose(s.fr, weights(s.t, s.dt, L, t_exp, starts)), flux, rng, gain=gain, **noise)
 
 
+def bands(s, x, n=8):
+    """PSNR over the fan in n bands of sensor rows, top to bottom (nan where a band misses the fan)"""
+    e = np.linspace(0, s.H, n + 1).astype(int)
+    return np.array([psnr(s.truth[a:b][s.mask[a:b]], x[a:b][s.mask[a:b]], data_range=1) if s.mask[a:b].any()
+                     else np.nan for a, b in zip(e[:-1], e[1:])])
+
+
 def score(s, x):
     """(PSNR, SSIM) against the ground truth over the fan"""
     return psnr(s.truth[s.mask], x[s.mask], data_range=1), ssim(s.truth, x * s.mask, data_range=1)
