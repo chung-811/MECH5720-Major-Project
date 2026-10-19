@@ -3,7 +3,7 @@
 Time model. Sub-frame k is the fan at t_k = (k + 0.5) dt and stands for [t_k - dt/2, t_k + dt/2).
 A sensor line that opens at s and exposes for t_exp collects
     w_k = L(t_k) * overlap(sub-frame k, [s, s + t_exp))       (light x seconds)
-Global shutter: every line opens at t_start. Rolling shutter: line l opens at t_start + l t_line.
+Global shutter: every line opens at 0. Rolling shutter: line l opens at l t_line.
 Lines are image rows (axis 0) or columns (axis 1, camera on its side).
 
 Deblur model. Unwrapped about the hub, the blade turns by omega t along theta, so polar sample i sees
@@ -75,10 +75,11 @@ def polar(img, centre, r, th):
 
 
 def cartesian(p, centre, r, th, shape):
-    """inverse of polar, zero outside the sampled radii and angles"""
+    """inverse of polar, zero outside the sampled radii and angles. th[0] in (-pi, pi], see grid"""
     yy, xx = np.mgrid[:shape[0], :shape[1]]
     rr = np.hypot(yy - centre[0], xx - centre[1])
     ang = np.arctan2(centre[0] - yy, xx - centre[1])
+    ang = np.where(ang < th[0], ang + 2 * np.pi, ang)          # measured on from th[0], for arcs past +-pi
     out = map_coordinates(p, [(rr - r[0]) / (r[1] - r[0]), (ang - th[0]) / (th[1] - th[0])], order=1, mode="nearest")
     out[(rr < r[0]) | (rr > r[-1]) | (ang < th[0]) | (ang > th[-1])] = 0
     return out
@@ -100,31 +101,37 @@ def ring_matrix(w, t, omega, dth, n):
     return A.reshape(n, N), m
 
 
-def deblur_ring(A, m, b, lam):
+def tikhonov_ring(A, m, b, lam):
     """argmin |Ax - b|^2 + lam |Dx|^2 with D the first difference, returned over the window"""
     N = A.shape[1]
     D = np.diff(np.eye(N), axis=0)
     return np.linalg.solve(A.T @ A + lam * D.T @ D, A.T @ b)[m:m + len(b)]
 
 
-def deblur(P, lines, t, dt, L, t_exp, omega, dth, lam, t_start=0.0, t_line=0.0, per_row=True, ref_line=0):
-    """deblur every ring of polar image P. lines: sensor line of each sample.
-    per_row=False uses ref_line's timing for every sample"""
+def _starts(lines_k, t_line, per_row, ref_line):
+    """open time of the sensor line of each sample in one ring (one value when they all share it)"""
+    return (lines_k if t_line and per_row else np.array([ref_line])) * t_line
+
+
+def tikhonov(scene, P, lines, L, t_exp, lam, t_line=0.0, per_row=True, ref_line=0, omega=None):
+    """fast baseline deblur, ring by ring. P: polar image, lines: sensor line of each sample,
+    L: monitor brightness at scene.t. per_row=False uses ref_line's timing for every sample"""
+    om = scene.omega if omega is None else omega
     out = np.empty_like(P)
     for k in range(len(P)):
-        starts = t_start + (lines[k] if t_line and per_row else np.array([ref_line])) * t_line
-        out[k] = deblur_ring(*ring_matrix(weights(t, dt, L, t_exp, starts), t, omega, dth, P.shape[1]), P[k], lam)
+        w = weights(scene.t, scene.dt, L, t_exp, _starts(lines[k], t_line, per_row, ref_line))
+        out[k] = tikhonov_ring(*ring_matrix(w, scene.t, om, scene.dtheta, P.shape[1]), P[k], lam)
     return out
 
 
-def operator(s, L, t_exp, lines, t_line=0.0, per_row=True, ref_line=0, omega=None):
+def forward_model(scene, L, t_exp, lines, t_line=0.0, per_row=True, ref_line=0, omega=None):
     """(A, m): sparse forward model of every ring in `lines`, polar image (R, N) -> polar data (R, n).
-    omega defaults to the true speed"""
+    omega defaults to scene.omega"""
+    om = scene.omega if omega is None else omega
     blocks = []
     for k in range(len(lines)):
-        starts = (lines[k] if t_line and per_row else np.array([ref_line])) * t_line
-        Ak, m = ring_matrix(weights(s.t, s.dt, L, t_exp, starts), s.t, s.om if omega is None else omega,
-                            s.dth, len(s.th))
+        w = weights(scene.t, scene.dt, L, t_exp, _starts(lines[k], t_line, per_row, ref_line))
+        Ak, m = ring_matrix(w, scene.t, om, scene.dtheta, len(scene.th))
         blocks.append(sp.csr_matrix(Ak))
     return sp.block_diag(blocks, format="csr"), m
 
@@ -137,7 +144,7 @@ def _drunet():
 
 def dpir(A, m, P, sigma=None, full=False):
     """plug-and-play deblur: DPIR (HQS with a pretrained DRUNet denoiser as the prior, Zhang et al.,
-    TPAMI 2022) through deepinv, on our operator. sigma: noise in P, estimated from P when None.
+    TPAMI 2022) through deepinv, on our forward model. sigma: noise in P, estimated from P when None.
     full: return the whole polar estimate (R, N) instead of the window"""
     import torch
     import deepinv as dinv
@@ -152,7 +159,7 @@ def dpir(A, m, P, sigma=None, full=False):
     return X.numpy()[0, 0] if full else X.numpy()[0, 0][:, m:m + n]
 
 
-def speed(s, P, lines, L, t_exp, omegas, rings=64, **kw):
+def speed(scene, P, lines, L, t_exp, omegas, rings=64, **kw):
     """blind speed: the omega whose DPIR deblur best explains the data, on a band of rings mid-blade,
     refined by a parabola through the best grid point and its neighbours. A wrong speed predicts the
     blur wrongly and the prior will not let DPIR fit it anyway. In simulation (3 speeds x 3 noise draws)
@@ -160,7 +167,7 @@ def speed(s, P, lines, L, t_exp, omegas, rings=64, **kw):
     band = slice(len(P) // 2 - rings // 2, len(P) // 2 + rings // 2)
     scores = []
     for om in omegas:
-        A, m = operator(s, L, t_exp, lines[band], omega=om, **kw)
+        A, m = forward_model(scene, L, t_exp, lines[band], omega=om, **kw)
         X = dpir(A, m, P[band], full=True)
         scores.append(np.linalg.norm(A @ X.ravel() - P[band].ravel()))
     scores = np.array(scores)
@@ -170,49 +177,61 @@ def speed(s, P, lines, L, t_exp, omegas, rings=64, **kw):
     return omegas[i] + (0.5 * (a - c) / d if d > 0 else 0.0) * (omegas[1] - omegas[0]), scores
 
 
+def grid(hub, r, th0, th1, dtheta, shape, axis, t, dt, omega):
+    """the unwrap grid and time grid every function here works on: rings r (px) about hub (row, col),
+    angles th0..th1 (rad, counter-clockwise from +col) dtheta apart, sub-frames t of length dt, blade
+    speed omega (rad/s, + = counter-clockwise in the image). axis: sensor lines are rows (0) or cols (1)"""
+    while th0 > np.pi:                     # any arc start, e.g. 200 deg, as the same arc from (-pi, pi]
+        th0, th1 = th0 - 2 * np.pi, th1 - 2 * np.pi
+    while th0 <= -np.pi:
+        th0, th1 = th0 + 2 * np.pi, th1 + 2 * np.pi
+    return SimpleNamespace(hub=tuple(hub), r=np.asarray(r, float), th=np.arange(th0, th1, dtheta), dtheta=dtheta,
+                           shape=tuple(shape), axis=axis, n_lines=shape[axis], t=np.asarray(t), dt=float(dt),
+                           omega=float(omega))
+
+
 def load(path, axis=1, pad=0.02):
-    """renders plus the unwrap grid (radii 1 px apart, arc 1 px apart at the outer edge, from the blade
-    at t = 0 to past where it ends up), the ground truth through the same interpolation, and the mask.
-    axis: readout direction of the rolling shutter, 1 = columns (camera on its side)"""
+    """a Blender render (blender/render_fan.py) as a scene: the grid (radii 1 px apart, arc 1 px apart at
+    the outer edge, from the blade at t = 0 to past where it ends up), the frames, the ground truth through
+    the same interpolation, and the mask. axis: readout direction, 1 = columns (camera on its side)"""
     d = np.load(path)
-    s = SimpleNamespace(fr=d["frames"], t=d["t"], dt=float(d["dt"]), om=float(d["omega"]), ref=d["ref"], axis=axis)
-    s.H, s.W = s.ref.shape
-    s.c = tuple(d["hub"])
-    s.r = np.arange(float(d["r0_px"]) - 5, float(d["r1_px"]) + 5)
-    s.dth = 1 / s.r[-1]
+    ref, t, dt, om = d["ref"], d["t"], float(d["dt"]), float(d["omega"])
+    r = np.arange(float(d["r0_px"]) - 5, float(d["r1_px"]) + 5)
     ha = float(d["half_angle"])
-    s.th = np.arange(-np.pi / 2 - ha - pad, -np.pi / 2 + ha + s.om * (s.t[-1] + s.dt) + pad, s.dth)
-    s.lines = s.W if axis else s.H
-    s.truth = cartesian(polar(s.ref, s.c, s.r, s.th)[0], s.c, s.r, s.th, s.ref.shape)
-    window = cartesian(np.ones((len(s.r), len(s.th))), s.c, s.r, s.th, s.ref.shape) > 0.5
-    s.mask = window & binary_dilation(s.truth > 0.05, iterations=5)      # the blade, 5 px margin
-    return s
+    scene = grid(d["hub"], r, -np.pi / 2 - ha - pad, -np.pi / 2 + ha + om * (t[-1] + dt) + pad, 1 / r[-1],
+                 ref.shape, axis, t, dt, om)
+    scene.frames, scene.ref = d["frames"], ref
+    scene.truth = wrap(scene, unwrap(scene, ref)[0])
+    window = wrap(scene, np.ones((len(scene.r), len(scene.th)))) > 0.5
+    scene.mask = window & binary_dilation(scene.truth > 0.05, iterations=5)      # the blade, 5 px margin
+    return scene
 
 
-def unwrap(s, img):
+def unwrap(scene, img):
     """polar image and the sensor line of each sample"""
-    P, rows, cols = polar(img, s.c, s.r, s.th)
-    return P, (cols if s.axis else rows)
+    P, rows, cols = polar(img, scene.hub, scene.r, scene.th)
+    return P, (cols if scene.axis else rows)
 
 
-def wrap(s, P):
-    return cartesian(P, s.c, s.r, s.th, s.ref.shape)
+def wrap(scene, P):
+    return cartesian(P, scene.hub, scene.r, scene.th, scene.shape)
 
 
-def capture(s, L, t_exp, flux, rng, t_line=0.0, gain=1.0, **noise):
-    """noisy image of the renders under brightness L. t_line 0 = global shutter"""
-    starts = np.arange(s.lines) * t_line if t_line else [0.0]
-    return sensor(expose(s.fr, weights(s.t, s.dt, L, t_exp, starts), s.axis), flux, rng, gain=gain, **noise)
+def capture(scene, L, t_exp, flux, rng, t_line=0.0, gain=1.0, **noise):
+    """noisy image of the render under brightness L. t_line 0 = global shutter"""
+    starts = np.arange(scene.n_lines) * t_line if t_line else [0.0]
+    return sensor(expose(scene.frames, weights(scene.t, scene.dt, L, t_exp, starts), scene.axis), flux, rng,
+                  gain=gain, **noise)
 
 
-def bands(s, x, n=8):
+def bands(scene, x, n=8):
     """PSNR over the mask in n bands of sensor lines, first line to last (nan where a band misses it)"""
-    e = np.linspace(0, s.lines, n + 1).astype(int)
-    T, X, M = (s.truth, x, s.mask) if s.axis == 0 else (s.truth.T, x.T, s.mask.T)
+    e = np.linspace(0, scene.n_lines, n + 1).astype(int)
+    T, X, M = (scene.truth, x, scene.mask) if scene.axis == 0 else (scene.truth.T, x.T, scene.mask.T)
     return np.array([psnr(T[a:b][M[a:b]], X[a:b][M[a:b]], data_range=1) if M[a:b].any() else np.nan
                      for a, b in zip(e[:-1], e[1:])])
 
 
-def score(s, x):
+def score(scene, x):
     """(PSNR, SSIM) against the ground truth over the blade"""
-    return psnr(s.truth[s.mask], x[s.mask], data_range=1), ssim(s.truth, x * s.mask, data_range=1)
+    return psnr(scene.truth[scene.mask], x[scene.mask], data_range=1), ssim(scene.truth, x * scene.mask, data_range=1)

@@ -1,3 +1,4 @@
+import glob
 import json
 
 import numpy as np
@@ -8,6 +9,17 @@ from scipy.signal import savgol_filter
 import flutter as F
 
 # real captures: linear raw loading, hub calibration from two stepped frames, light waveform from an edge
+
+
+def files(patterns):
+    """paths from names or patterns like cap*.dng, sorted (Windows shells leave patterns for us to expand)"""
+    out = []
+    for p in map(str, patterns):
+        hits = sorted(glob.glob(p))
+        if not hits:
+            raise SystemExit(f"no file matches {p}")
+        out += hits
+    return out
 
 
 def load_dng(path):
@@ -62,7 +74,10 @@ def kernel_from_edge(img, hub, r, th, omega, t, window=9):
     the rings are averaged, and the average is differentiated once. th: from inside the blade to past
     the end of the smear. omega: the known (commanded) speed of this capture. window: samples in the
     Savitzky-Golay derivative, keep it well under a chip (omega x chip / dth samples).
+    Clockwise (omega < 0) is mirrored left-right first, so it reads as counter-clockwise.
     Returns L(t) with its brightest level at 1, 0 outside the measured smear"""
+    if omega < 0:              # angle a becomes pi - a, so th reverses to stay increasing
+        img, hub, th, omega = img[:, ::-1], (hub[0], img.shape[1] - 1 - hub[1]), np.pi - th[::-1], -omega
     P = F.polar(img, hub, r, th)[0]
     idx = np.arange(P.shape[1], dtype=float)
     half = []

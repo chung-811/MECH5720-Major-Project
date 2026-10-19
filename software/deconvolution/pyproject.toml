@@ -1,0 +1,30 @@
+[project]
+name = "deconvolution"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "scipy",
+    "scikit-image",
+    "matplotlib",
+    "deepinv>=0.4.2",
+    "pywavelets>=1.9.0",
+    "rawpy>=0.27.1",
+    "torch",            # listed so the sources below apply: CPU-only builds, no 2.5 GB of CUDA on Linux
+    "torchvision",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform != 'darwin'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform != 'darwin'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
