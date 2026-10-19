@@ -60,31 +60,33 @@ Blender's own shutter curve and rolling shutter are not used: the curve leaks ab
 light into off chips, and its rolling shutter squeezes the whole code into every row instead of
 giving each row its own slice of one flashing monitor.
 
+Scene: one 50 mm blade filling the frame height, hub above the frame, black backdrop, 0.35 rpm.
+
 ```
 uv sync
-blender -b -P blender/render_fan.py -- --rpm 2 --t_end 0.9 --dt 0.0041667 --out renders/fan.npz
-uv run python demo.py renders/fan.npz
+blender -b -P blender/render_fan.py -- --out renders/blade.npz
+uv run python demo.py renders/blade.npz
+
+# criterion 1: per-row vs per-frame over code length and OV5647 readout. last arg: 1 = readout
+# across columns (camera on its side), 0 = down rows
+uv run python rows.py renders/blade.npz 1
 
 # robustness: finer sub-frames, smooth and 28BYJ-48 stepped
-blender -b -P blender/render_fan.py -- --rpm 2 --t_end 0.9 --dt 0.0020833 --out renders/fan480.npz
-blender -b -P blender/render_fan.py -- --rpm 2 --t_end 0.9 --dt 0.0020833 --steps_per_rev 2038 --out renders/fan480_steps.npz
-uv run python robust.py renders/fan480.npz renders/fan480_steps.npz
-
-# criterion 1: per-row vs per-frame over code length and OV5647 readout
-blender -b -P blender/render_fan.py -- --rpm 2 --t_end 0.95 --dt 0.0041667 --out renders/fan_long.npz
-uv run python rows.py renders/fan_long.npz
+blender -b -P blender/render_fan.py -- --dt 0.0020833 --out renders/blade480.npz
+blender -b -P blender/render_fan.py -- --dt 0.0020833 --steps_per_rev 2038 --out renders/blade480_steps.npz
+uv run python robust.py renders/blade480.npz renders/blade480_steps.npz
 ```
 
-Process captures in raw sensor orientation: the per-row timing follows sensor rows, so rotate for
+Process captures in raw sensor orientation: the per-row timing follows sensor lines, so rotate for
 display only after deblurring.
 
 | File | What |
 | --- | --- |
-| `blender/render_fan.py` | fan as sharp linear frames at t = (k + 0.5) dt, plus the t = 0 reference |
-| `flutter.py` | monitor code, row exposure weights, sensor noise, polar unwrap, ring deblur, blind speed |
+| `blender/render_fan.py` | blade as sharp linear frames at t = (k + 0.5) dt, plus the t = 0 reference |
+| `flutter.py` | monitor code, line exposure weights, sensor noise, arc unwrap about the hub, deblur, blind speed |
 | `demo.py` | GS per-frame vs RS per-frame vs RS per-row, constant light, short exposure, speed estimate |
-| `rows.py` | GS vs RS per-frame vs RS per-row by row band, for 52/31/15-chip codes and three readouts |
-| `robust.py` | PSNR cost of black level, LCD lag, code timing, hub centre error, stepper motion |
+| `rows.py` | GS vs RS per-frame vs RS per-row by band of sensor lines, 52/31/15-chip codes, three readouts |
+| `robust.py` | PSNR cost of black level, LCD lag, code timing, hub error, stepper motion |
 
 One solver serves all three methods; they differ only in which exposure window each polar sample
-gets. Fan geometry and sensor noise numbers are placeholders until the fan and cameras are measured.
+gets. Blade geometry and sensor noise numbers are placeholders until the fan and cameras are measured.

@@ -1,20 +1,21 @@
 """Coded illumination: exposure synthesis, sensor noise, polar unwrap, deblur, speed estimate.
 
 Time model. Sub-frame k is the fan at t_k = (k + 0.5) dt and stands for [t_k - dt/2, t_k + dt/2).
-A sensor row that opens at s and exposes for t_exp collects
+A sensor line that opens at s and exposes for t_exp collects
     w_k = L(t_k) * overlap(sub-frame k, [s, s + t_exp))       (light x seconds)
-and its pixel value is sum_k w_k frame_k. Global shutter: every row opens at t_start.
-Rolling shutter: row y opens at t_start + y t_line.
+Global shutter: every line opens at t_start. Rolling shutter: line l opens at t_start + l t_line.
+Lines are image rows (axis 0) or columns (axis 1, camera on its side).
 
-Deblur model. Unwrapped about the hub, the fan turns by omega t along theta, so polar sample i sees
-    b_i = sum_k w_k(row_i) x(theta_i - omega t_k)
-which is one ring matrix A per radius. Global shutter: the same w for every sample (circulant).
-Rolling shutter per-row: w from the sample's own sensor row. Per-frame: one row's w for all samples.
+Deblur model. Unwrapped about the hub, the blade turns by omega t along theta, so polar sample i sees
+    b_i = sum_k w_k(line_i) x(theta_i - omega t_k)
+one matrix A per radius over the arc in view. The arc does not wrap, so x carries extra samples
+behind the window for the light that moved into it. Global shutter: the same w for every sample.
+Rolling shutter per-row: w from the sample's own sensor line. Per-frame: one line's w for all.
 """
 from types import SimpleNamespace
 
 import numpy as np
-from scipy.ndimage import map_coordinates
+from scipy.ndimage import binary_dilation, map_coordinates
 from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similarity as ssim
 
 CHIP = 1 / 60                                               # one monitor refresh
@@ -41,17 +42,17 @@ def lcd(L, dt, tau):
 
 
 def weights(t, dt, L, t_exp, starts):
-    """(rows, frames) light x seconds each row collects from each sub-frame. starts: row open times"""
+    """(lines, frames) light x seconds each line collects from each sub-frame. starts: line open times"""
     s = np.asarray(starts, float)[:, None]
     ov = np.minimum(t + dt / 2, s + t_exp) - np.maximum(t - dt / 2, s)
     return L * np.clip(ov, 0, None)
 
 
-def expose(frames, w):
-    """image from sub-frames. w is (1, K) for global shutter or (H, K) for one row each"""
+def expose(frames, w, axis=0):
+    """image from sub-frames. w is (1, K) for global shutter or (lines, K) for one line each"""
     if len(w) == 1:
         return np.tensordot(w[0], frames, 1)
-    return np.einsum("yk,kyx->yx", w, frames)
+    return np.einsum("yk,kyx->yx" if axis == 0 else "xk,kyx->yx", w, frames)
 
 
 def sensor(img, flux, rng, full_e=10000, read_e=3.0, bits=10, gain=1.0):
@@ -63,94 +64,108 @@ def sensor(img, flux, rng, full_e=10000, read_e=3.0, bits=10, gain=1.0):
     return dn * step / flux
 
 
-def polar(img, centre, r, n):
-    """samples at radii r and n angles (counter-clockwise from +x on screen), and the row of each"""
-    th = 2 * np.pi * np.arange(n) / n
+def polar(img, centre, r, th):
+    """samples at radii r and angles th (counter-clockwise from +x on screen), with their rows and cols"""
     rows = centre[0] - r[:, None] * np.sin(th)
     cols = centre[1] + r[:, None] * np.cos(th)
-    return map_coordinates(img, [rows, cols], order=1), rows
+    return map_coordinates(img, [rows, cols], order=1), rows, cols
 
 
-def cartesian(p, centre, r, shape):
-    """inverse of polar, zero outside the sampled radii"""
+def cartesian(p, centre, r, th, shape):
+    """inverse of polar, zero outside the sampled radii and angles"""
     yy, xx = np.mgrid[:shape[0], :shape[1]]
     rr = np.hypot(yy - centre[0], xx - centre[1])
-    th = np.arctan2(centre[0] - yy, xx - centre[1]) % (2 * np.pi)
-    ri = (rr - r[0]) / (r[1] - r[0])
-    ti = th / (2 * np.pi) * p.shape[1]
-    out = map_coordinates(p, [ri, ti], order=1, mode="grid-wrap")
-    out[(rr < r[0]) | (rr > r[-1])] = 0
+    ang = np.arctan2(centre[0] - yy, xx - centre[1])
+    out = map_coordinates(p, [(rr - r[0]) / (r[1] - r[0]), (ang - th[0]) / (th[1] - th[0])], order=1, mode="nearest")
+    out[(rr < r[0]) | (rr > r[-1]) | (ang < th[0]) | (ang > th[-1])] = 0
     return out
 
 
-def ring_matrix(w, t, omega, n):
-    """A[i, j]: weight of x_j in b_i. w is (n, K), one row of weights per sample, or (1, K)"""
+def ring_matrix(w, t, omega, dth, n):
+    """(A, m): A[i, j] is the weight of x_j in b_i, x starting m samples before the window and
+    running past it, to hold the light that moved in from either side. w is (n, K) or (1, K)"""
     w = np.broadcast_to(w, (n, len(t)))
-    pos = np.arange(n)[:, None] - omega * t * n / (2 * np.pi)   # where x was at each sub-frame
+    shift = omega * t / dth                                  # samples moved by each sub-frame
+    m = int(np.ceil(max(shift.max(), 0))) + 1
+    N = n + m + int(np.ceil(max(-shift.min(), 0))) + 1
+    pos = np.arange(n)[:, None] - shift + m
     j = np.floor(pos).astype(int)
     f = pos - j
     i = np.repeat(np.arange(n)[:, None], len(t), 1)
-    A = np.bincount((i * n + j % n).ravel(), (w * (1 - f)).ravel(), n * n)
-    A += np.bincount((i * n + (j + 1) % n).ravel(), (w * f).ravel(), n * n)
-    return A.reshape(n, n)
+    A = np.bincount((i * N + j).ravel(), (w * (1 - f)).ravel(), n * N)
+    A += np.bincount((i * N + j + 1).ravel(), (w * f).ravel(), n * N)
+    return A.reshape(n, N), m
 
 
-def deblur_ring(A, b, lam):
-    """argmin |Ax - b|^2 + lam |Dx|^2, D the circular first difference along theta"""
-    n = len(b)
-    D = np.eye(n) - np.roll(np.eye(n), 1, 1)
-    return np.linalg.solve(A.T @ A + lam * D.T @ D, A.T @ b)
+def deblur_ring(A, m, b, lam):
+    """argmin |Ax - b|^2 + lam |Dx|^2 with D the first difference, returned over the window"""
+    N = A.shape[1]
+    D = np.diff(np.eye(N), axis=0)
+    return np.linalg.solve(A.T @ A + lam * D.T @ D, A.T @ b)[m:m + len(b)]
 
 
-def deblur(P, rows, t, dt, L, t_exp, omega, lam, t_start=0.0, t_line=0.0, per_row=True, ref_row=None):
-    """deblur every ring of polar image P. per_row=False uses ref_row's timing for every sample"""
+def deblur(P, lines, t, dt, L, t_exp, omega, dth, lam, t_start=0.0, t_line=0.0, per_row=True, ref_line=0):
+    """deblur every ring of polar image P. lines: sensor line of each sample.
+    per_row=False uses ref_line's timing for every sample"""
     out = np.empty_like(P)
-    n = P.shape[1]
     for k in range(len(P)):
-        if t_line and per_row:
-            w = weights(t, dt, L, t_exp, t_start + rows[k] * t_line)
-        else:
-            w = weights(t, dt, L, t_exp, [t_start + (ref_row or 0) * t_line])
-        out[k] = deblur_ring(ring_matrix(w, t, omega, n), P[k], lam)
+        starts = t_start + (lines[k] if t_line and per_row else np.array([ref_line])) * t_line
+        out[k] = deblur_ring(*ring_matrix(weights(t, dt, L, t_exp, starts), t, omega, dth, P.shape[1]), P[k], lam)
     return out
 
 
-def speed(P, rows, t, dt, L, t_exp, omegas, lam, **kw):
+def speed(P, lines, t, dt, L, t_exp, omegas, dth, lam, **kw):
     """blind speed: the omega whose deblur leaves the least negative light. returns best, scores"""
     scores = []
     for om in omegas:
-        x = deblur(P, rows, t, dt, L, t_exp, om, lam, **kw)
+        x = deblur(P, lines, t, dt, L, t_exp, om, dth, lam, **kw)
         scores.append(np.clip(-x, 0, None).sum() / np.abs(x).sum())
     return omegas[int(np.argmin(scores))], np.array(scores)
 
 
-def load(path, r0=30):
-    """renders plus the unwrap grid, the ground truth through the same interpolation, and the fan mask"""
+def load(path, axis=1, pad=0.02):
+    """renders plus the unwrap grid (radii 1 px apart, arc 1 px apart at the outer edge, from the blade
+    at t = 0 to past where it ends up), the ground truth through the same interpolation, and the mask.
+    axis: readout direction of the rolling shutter, 1 = columns (camera on its side)"""
     d = np.load(path)
-    s = SimpleNamespace(fr=d["frames"], t=d["t"], dt=float(d["dt"]), om=float(d["omega"]), ref=d["ref"])
-    s.H = s.ref.shape[0]
-    s.c = ((s.H - 1) / 2,) * 2
-    s.r = np.arange(r0, float(d["rim_px"]) - 2)
-    s.n = int(2 * np.pi * s.r[-1])
-    s.truth = cartesian(polar(s.ref, s.c, s.r, s.n)[0], s.c, s.r, s.ref.shape)
-    rr = np.hypot(*(np.mgrid[:s.H, :s.H] - s.c[0]))
-    s.mask = (rr >= s.r[0]) & (rr <= s.r[-1])
+    s = SimpleNamespace(fr=d["frames"], t=d["t"], dt=float(d["dt"]), om=float(d["omega"]), ref=d["ref"], axis=axis)
+    s.H, s.W = s.ref.shape
+    s.c = tuple(d["hub"])
+    s.r = np.arange(float(d["r0_px"]) - 5, float(d["r1_px"]) + 5)
+    s.dth = 1 / s.r[-1]
+    ha = float(d["half_angle"])
+    s.th = np.arange(-np.pi / 2 - ha - pad, -np.pi / 2 + ha + s.om * (s.t[-1] + s.dt) + pad, s.dth)
+    s.lines = s.W if axis else s.H
+    s.truth = cartesian(polar(s.ref, s.c, s.r, s.th)[0], s.c, s.r, s.th, s.ref.shape)
+    window = cartesian(np.ones((len(s.r), len(s.th))), s.c, s.r, s.th, s.ref.shape) > 0.5
+    s.mask = window & binary_dilation(s.truth > 0.05, iterations=5)      # the blade, 5 px margin
     return s
+
+
+def unwrap(s, img):
+    """polar image and the sensor line of each sample"""
+    P, rows, cols = polar(img, s.c, s.r, s.th)
+    return P, (cols if s.axis else rows)
+
+
+def wrap(s, P):
+    return cartesian(P, s.c, s.r, s.th, s.ref.shape)
 
 
 def capture(s, L, t_exp, flux, rng, t_line=0.0, gain=1.0, **noise):
     """noisy image of the renders under brightness L. t_line 0 = global shutter"""
-    starts = np.arange(s.H) * t_line if t_line else [0.0]
-    return sensor(expose(s.fr, weights(s.t, s.dt, L, t_exp, starts)), flux, rng, gain=gain, **noise)
+    starts = np.arange(s.lines) * t_line if t_line else [0.0]
+    return sensor(expose(s.fr, weights(s.t, s.dt, L, t_exp, starts), s.axis), flux, rng, gain=gain, **noise)
 
 
 def bands(s, x, n=8):
-    """PSNR over the fan in n bands of sensor rows, top to bottom (nan where a band misses the fan)"""
-    e = np.linspace(0, s.H, n + 1).astype(int)
-    return np.array([psnr(s.truth[a:b][s.mask[a:b]], x[a:b][s.mask[a:b]], data_range=1) if s.mask[a:b].any()
-                     else np.nan for a, b in zip(e[:-1], e[1:])])
+    """PSNR over the mask in n bands of sensor lines, first line to last (nan where a band misses it)"""
+    e = np.linspace(0, s.lines, n + 1).astype(int)
+    T, X, M = (s.truth, x, s.mask) if s.axis == 0 else (s.truth.T, x.T, s.mask.T)
+    return np.array([psnr(T[a:b][M[a:b]], X[a:b][M[a:b]], data_range=1) if M[a:b].any() else np.nan
+                     for a, b in zip(e[:-1], e[1:])])
 
 
 def score(s, x):
-    """(PSNR, SSIM) against the ground truth over the fan"""
+    """(PSNR, SSIM) against the ground truth over the blade"""
     return psnr(s.truth[s.mask], x[s.mask], data_range=1), ssim(s.truth, x * s.mask, data_range=1)

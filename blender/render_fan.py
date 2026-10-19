@@ -7,21 +7,21 @@ from pathlib import Path
 import bpy
 import numpy as np
 
-# fan geometry in metres. placeholders until the real fan is designed
-HUB_R = 0.025
-BLADE_R0, BLADE_R1, BLADE_W = 0.02, 0.10, 0.035
-TEXT_H = 0.014
-LABELS = ["ABCD", "EFGH", "KLMN"]
-VIEW_W = 0.22                     # width of the square view
-WHITE, GREY, BLACK = 0.8, 0.3, 0.03
+# one blade seen close up, hub above the frame. metres. placeholders until the fan is designed
+R0, R1 = 0.030, 0.080             # blade inner and outer edge from the rotation centre
+W0, W1 = 0.015, 0.030             # blade width at R0 (narrow end, toward the hub) and at R1
+LETTERS, TEXT_H = "ABC", 0.008    # stacked down the blade
+VIEW_H = 0.055                    # frame height: the 50 mm blade roughly fills it
+WHITE, BLACK = 0.8, 0.03
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--rpm", type=float, default=2.0)
-ap.add_argument("--t_end", type=float, default=0.9)
+ap.add_argument("--rpm", type=float, default=0.35)
+ap.add_argument("--t_end", type=float, default=0.95)
 ap.add_argument("--dt", type=float, default=1 / 120)
-ap.add_argument("--size", type=int, default=400)
+ap.add_argument("--width", type=int, default=728)    # half the IMX296 1456 x 1088
+ap.add_argument("--height", type=int, default=544)
 ap.add_argument("--steps_per_rev", type=float, default=0, help="0 = smooth, 2038 = 28BYJ-48 full steps")
-ap.add_argument("--out", default="renders/fan.npz")
+ap.add_argument("--out", default="renders/blade.npz")
 a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
 
 s = bpy.context.scene
@@ -35,41 +35,29 @@ def mat(v):
     return m
 
 
-def mesh(name, verts, v, parent):
-    me = bpy.data.meshes.new(name)
-    me.from_pydata(verts, [], [list(range(len(verts)))])
-    me.materials.append(mat(v))
-    o = bpy.data.objects.new(name, me)
-    s.collection.objects.link(o)
-    o.parent = parent
-    return o
-
-
-hub = bpy.data.objects.new("hub", None)
+hub = bpy.data.objects.new("hub", None)       # rotation centre at the world origin
 s.collection.objects.link(hub)
-mesh("disc", [(HUB_R * math.cos(a), HUB_R * math.sin(a), 0.001)
-              for a in np.linspace(0, 2 * math.pi, 64, endpoint=False)], GREY, hub)
 
-for i, label in enumerate(LABELS):
-    ang = 2 * math.pi * i / len(LABELS)
-    mid = (BLADE_R0 + BLADE_R1) / 2
-    c, sn = math.cos(ang), math.sin(ang)
-    corners = [(BLADE_R0, -BLADE_W / 2), (BLADE_R1, -BLADE_W / 2), (BLADE_R1, BLADE_W / 2), (BLADE_R0, BLADE_W / 2)]
-    mesh(f"blade{i}", [(x * c - y * sn, x * sn + y * c, 0) for x, y in corners], WHITE, hub)
+me = bpy.data.meshes.new("blade")             # pointing down (-y) at angle 0
+me.from_pydata([(-W0 / 2, -R0, 0), (-W1 / 2, -R1, 0), (W1 / 2, -R1, 0), (W0 / 2, -R0, 0)], [], [[0, 1, 2, 3]])
+me.materials.append(mat(WHITE))
+blade = bpy.data.objects.new("blade", me)
+s.collection.objects.link(blade)
+blade.parent = hub
 
+for i, ch in enumerate(LETTERS):
     txt = bpy.data.curves.new(f"t{i}", "FONT")
-    txt.body, txt.size = label, TEXT_H
+    txt.body, txt.size = ch, TEXT_H
     txt.align_x, txt.align_y = "CENTER", "CENTER"
     txt.materials.append(mat(BLACK))
     t = bpy.data.objects.new(f"t{i}", txt)
-    t.location = (mid * math.cos(ang), mid * math.sin(ang), 0.002)
-    t.rotation_euler.z = ang
+    t.location = (0, -(R0 + (R1 - R0) * (i + 1) / (len(LETTERS) + 1)), 0.001)
     s.collection.objects.link(t)
     t.parent = hub
 
 cam = bpy.data.objects.new("cam", bpy.data.cameras.new("cam"))
-cam.data.type, cam.data.ortho_scale = "ORTHO", VIEW_W
-cam.location = (0, 0, 1)
+cam.data.type, cam.data.sensor_fit, cam.data.ortho_scale = "ORTHO", "VERTICAL", VIEW_H
+cam.location = (0, -(R0 + R1) / 2, 1)
 s.collection.objects.link(cam)
 s.camera = cam
 
@@ -82,7 +70,7 @@ s.display.shading.background_type = "WORLD"
 s.display.shading.show_specular_highlight = False
 s.display.render_aa = "32"
 s.view_settings.view_transform = "Standard"
-s.render.resolution_x = s.render.resolution_y = a.size
+s.render.resolution_x, s.render.resolution_y = a.width, a.height
 s.render.resolution_percentage = 100
 s.render.image_settings.file_format = "OPEN_EXR"
 s.render.image_settings.color_depth = "32"
@@ -95,10 +83,10 @@ def render(theta):
     hub.rotation_euler.z = theta
     bpy.ops.render.render(write_still=True)
     img = bpy.data.images.load(str(tmp), check_existing=False)
-    px = np.empty(a.size * a.size * 4, np.float32)
+    px = np.empty(a.width * a.height * 4, np.float32)
     img.pixels.foreach_get(px)
     bpy.data.images.remove(img)
-    return px.reshape(a.size, a.size, 4)[::-1, :, 1].copy()  # blender stores bottom row first
+    return px.reshape(a.height, a.width, 4)[::-1, :, 1].copy()  # blender stores bottom row first
 
 
 omega = a.rpm * 2 * math.pi / 60
@@ -108,8 +96,11 @@ if a.steps_per_rev:                          # stop-start: hold each step until 
     step = 2 * math.pi / a.steps_per_rev
     theta = np.floor(theta / step) * step
 frames = np.stack([render(th) for th in theta])
+p = VIEW_H / a.height                        # metres per pixel
+hub_rc = (a.height / 2 - 0.5 - (R0 + R1) / 2 / p, a.width / 2 - 0.5)   # pixel centres at index + 0.5
 out = Path(a.out)
 out.parent.mkdir(parents=True, exist_ok=True)
-np.savez(out, frames=frames, t=t, dt=a.dt, omega=omega, ref=render(0.0),
-         px_m=VIEW_W / a.size, rim_px=BLADE_R1 / (VIEW_W / a.size))
-print(f"{len(t)} frames {a.size}px, {a.rpm} rpm, rim {BLADE_R1 * omega * a.dt / (VIEW_W / a.size):.2f} px per frame -> {out}")
+np.savez(out, frames=frames, t=t, dt=a.dt, omega=omega, ref=render(0.0), hub=hub_rc, px_m=p,
+         r0_px=R0 / p, r1_px=R1 / p, half_angle=max(math.atan2(W0 / 2, R0), math.atan2(W1 / 2, R1)))
+print(f"{len(t)} frames {a.width}x{a.height}, {1e-3 / p:.1f} px/mm, {a.rpm} rpm, "
+      f"outer edge {R1 * omega * a.dt / p:.2f} px per frame -> {out}")
