@@ -1,0 +1,18 @@
+{
+  "sequence": "1011 0011 1010 0110",
+  "bit_duration_s": 0.5,
+  "repeat": 1,
+  "invert": false,
+  "pre_roll_s": 1.0,
+  "post_roll_s": 1.0,
+  "end_color": "black",
+  "wait_for_start": true,
+
+  "capture": false,
+  "out_path": "data/coded",
+  "frames_per_bit": 1,
+  "exposure_us": 20000,
+  "analogue_gain": 16.0,
+  "settle_s": 0.05,
+  "discard_frames": 2
+}
