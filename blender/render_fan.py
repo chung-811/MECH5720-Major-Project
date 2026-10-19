@@ -21,6 +21,7 @@ ap.add_argument("--dt", type=float, default=1 / 120)
 ap.add_argument("--width", type=int, default=728)    # half the IMX296 1456 x 1088
 ap.add_argument("--height", type=int, default=544)
 ap.add_argument("--steps_per_rev", type=float, default=0, help="0 = smooth, 2038 = 28BYJ-48 full steps")
+ap.add_argument("--texture", default="", help="grey image printed on the blade, values taken as albedo")
 ap.add_argument("--out", default="renders/blade.npz")
 a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
 
@@ -41,6 +42,15 @@ s.collection.objects.link(hub)
 me = bpy.data.meshes.new("blade")             # pointing down (-y) at angle 0
 me.from_pydata([(-W0 / 2, -R0, 0), (-W1 / 2, -R1, 0), (W1 / 2, -R1, 0), (W0 / 2, -R0, 0)], [], [[0, 1, 2, 3]])
 me.materials.append(mat(WHITE))
+if a.texture:                                 # image across the blade, u across, v along it
+    me.uv_layers.new().data.foreach_set("uv", [0, 1, 0, 0, 1, 0, 1, 1])
+    m = me.materials[0]
+    m.use_nodes = True
+    tex = m.node_tree.nodes.new("ShaderNodeTexImage")
+    tex.image = bpy.data.images.load(str(Path(a.texture).resolve()))
+    tex.image.colorspace_settings.name = "Non-Color"           # pixel values are albedo, no sRGB decode
+    m.node_tree.links.new(tex.outputs["Color"], m.node_tree.nodes["Principled BSDF"].inputs["Base Color"])
+    m.node_tree.nodes.active = tex
 blade = bpy.data.objects.new("blade", me)
 s.collection.objects.link(blade)
 blade.parent = hub
@@ -65,7 +75,7 @@ s.world = bpy.data.worlds.new("w")
 s.world.color = (0, 0, 0)
 s.render.engine = "BLENDER_WORKBENCH"
 s.display.shading.light = "FLAT"
-s.display.shading.color_type = "MATERIAL"
+s.display.shading.color_type = "TEXTURE" if a.texture else "MATERIAL"
 s.display.shading.background_type = "WORLD"
 s.display.shading.show_specular_highlight = False
 s.display.render_aa = "32"

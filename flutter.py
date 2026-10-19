@@ -12,10 +12,13 @@ one matrix A per radius over the arc in view. The arc does not wrap, so x carrie
 behind the window for the light that moved into it. Global shutter: the same w for every sample.
 Rolling shutter per-row: w from the sample's own sensor line. Per-frame: one line's w for all.
 """
+from functools import lru_cache
 from types import SimpleNamespace
 
 import numpy as np
+import scipy.sparse as sp
 from scipy.ndimage import binary_dilation, map_coordinates
+from skimage.restoration import estimate_sigma
 from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similarity as ssim
 
 CHIP = 1 / 60                                               # one monitor refresh
@@ -112,6 +115,38 @@ def deblur(P, lines, t, dt, L, t_exp, omega, dth, lam, t_start=0.0, t_line=0.0, 
         starts = t_start + (lines[k] if t_line and per_row else np.array([ref_line])) * t_line
         out[k] = deblur_ring(*ring_matrix(weights(t, dt, L, t_exp, starts), t, omega, dth, P.shape[1]), P[k], lam)
     return out
+
+
+def operator(s, L, t_exp, lines, t_line=0.0, per_row=True, ref_line=0):
+    """(A, m): sparse forward model of every ring at once, polar image (R, N) -> polar data (R, n)"""
+    blocks = []
+    for k in range(len(s.r)):
+        starts = (lines[k] if t_line and per_row else np.array([ref_line])) * t_line
+        Ak, m = ring_matrix(weights(s.t, s.dt, L, t_exp, starts), s.t, s.om, s.dth, len(s.th))
+        blocks.append(sp.csr_matrix(Ak))
+    return sp.block_diag(blocks, format="csr"), m
+
+
+@lru_cache(1)
+def _drunet():
+    import deepinv as dinv
+    return dinv.models.DRUNet(in_channels=1, out_channels=1, pretrained="download", device="cpu")
+
+
+def dpir(A, m, P, sigma=None):
+    """plug-and-play deblur: DPIR (HQS with a pretrained DRUNet denoiser as the prior, Zhang et al.,
+    TPAMI 2022) through deepinv, on our operator. sigma: noise in P, estimated from P when None"""
+    import torch
+    import deepinv as dinv
+    R, n = P.shape
+    N = A.shape[1] // R
+    sigma = float(estimate_sigma(P)) if sigma is None else sigma
+    fwd = lambda X: torch.from_numpy(A @ X.numpy().ravel()).float().reshape(1, 1, R, n)
+    adj = lambda Y: torch.from_numpy(A.T @ Y.numpy().ravel()).float().reshape(1, 1, R, N)
+    with torch.no_grad():
+        X = dinv.optim.DPIR(sigma=sigma, denoiser=_drunet())(torch.from_numpy(P).float()[None, None],
+                                                             dinv.physics.LinearPhysics(A=fwd, A_adjoint=adj))
+    return X.numpy()[0, 0][:, m:m + n]
 
 
 def speed(P, lines, t, dt, L, t_exp, omegas, dth, lam, **kw):

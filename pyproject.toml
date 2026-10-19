@@ -2,4 +2,11 @@
 name = "flutter"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["numpy", "scipy", "scikit-image", "matplotlib"]
+dependencies = [
+    "numpy",
+    "scipy",
+    "scikit-image",
+    "matplotlib",
+    "deepinv>=0.4.2",
+    "pywavelets>=1.9.0",
+]

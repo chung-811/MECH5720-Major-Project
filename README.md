@@ -67,6 +67,13 @@ uv sync
 blender -b -P blender/render_fan.py -- --out renders/blade.npz
 uv run python demo.py renders/blade.npz
 
+# harder scene: a photo printed on the blade, and faster fans for the coding gain study
+uv run python -c "from skimage import data, transform; from PIL import Image; import numpy as np; im = 0.1 + 0.7 * transform.resize(data.camera() / 255, (1024, 512), anti_aliasing=True); Image.fromarray(np.round(im * 65535).astype(np.uint16)).save('renders/texture.png')"
+blender -b -P blender/render_fan.py -- --texture renders/texture.png --out renders/blade_tex.npz
+blender -b -P blender/render_fan.py -- --texture renders/texture.png --rpm 0.7 --dt 0.0041667 --out renders/blade_tex_0.7.npz
+blender -b -P blender/render_fan.py -- --texture renders/texture.png --rpm 1.4 --dt 0.0020833 --out renders/blade_tex_1.4.npz
+uv run python coding_gain.py renders/blade_tex.npz renders/blade_tex_0.7.npz renders/blade_tex_1.4.npz
+
 # criterion 1: per-row vs per-frame over code length and OV5647 readout. last arg: 1 = readout
 # across columns (camera on its side), 0 = down rows
 uv run python rows.py renders/blade.npz 1
@@ -85,8 +92,29 @@ display only after deblurring.
 | `blender/render_fan.py` | blade as sharp linear frames at t = (k + 0.5) dt, plus the t = 0 reference |
 | `flutter.py` | monitor code, line exposure weights, sensor noise, arc unwrap about the hub, deblur, blind speed |
 | `demo.py` | GS per-frame vs RS per-frame vs RS per-row, constant light, short exposure, speed estimate |
+| `coding_gain.py` | coded vs constant light vs denoised short exposure, over blur length and light level |
 | `rows.py` | GS vs RS per-frame vs RS per-row by band of sensor lines, 52/31/15-chip codes, three readouts |
 | `robust.py` | PSNR cost of black level, LCD lag, code timing, hub error, stepper motion |
+
+### Deconvolution
+
+`flutter.operator` builds the forward model as one sparse matrix; `flutter.dpir` inverts it with DPIR
+(Zhang et al., "Plug-and-Play Image Restoration with Deep Denoiser Prior", TPAMI 2022): half-quadratic
+splitting with a pretrained DRUNet denoiser as the prior, through the deepinv library. It needs no
+tuning: the noise level is estimated from the capture. `flutter.deblur` (per-ring Tikhonov with a
+gradient penalty) stays as the fast baseline and drives the blind speed search.
+
+Benchmark, global shutter, Raskar 52-chip code, 0.35 rpm (PSNR over the blade):
+
+| Solver | flat blade + letters | photo on the blade |
+| --- | --- | --- |
+| Tikhonov, best lam | 29.4 | 31.1 |
+| TV + [0, 1] box, Chambolle-Pock (pyproximal), best lam | 41.1 | 34.6 |
+| DPIR, no tuning | 44.3 | 36.3 |
+
+TV smears thin lines (the tripod legs); DPIR keeps them. With DPIR, coding the light only pays when
+the blur is long or the light is low: at 25 px of blur in full light constant light ties it, at
+50 to 100 px or a tenth of the light coded wins by 3 to 7 dB (`coding_gain.py`).
 
 One solver serves all three methods; they differ only in which exposure window each polar sample
 gets. Blade geometry and sensor noise numbers are placeholders until the fan and cameras are measured.

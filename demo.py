@@ -42,20 +42,23 @@ caps = {
     "GS short": F.capture(s, box, F.CHIP, flux, rng, gain=16, **NOISE),
 }
 res, lams = {}, {}
+print(f"{'method':24s} {'tikhonov (best lam)':>22s} {'DPIR (no tuning)':>18s}")
 for name, L, img, kw in [
     ("GS coded, per-frame", coded, caps["GS coded"], {}),
     ("RS coded, per-frame", coded, caps["RS coded"], dict(t_line=t_line, per_row=False, ref_line=s.lines // 2)),
     ("RS coded, per-row", coded, caps["RS coded"], dict(t_line=t_line)),
     ("GS constant, deblurred", box, caps["GS constant"], {}),
 ]:
-    res[name], lams[name] = best(*F.unwrap(s, img), L, Tc, **kw)
-    print(f"{name:24s} lam {lams[name]:.0e}  PSNR {F.score(s, res[name])[0]:5.2f} dB  SSIM {F.score(s, res[name])[1]:.3f}")
+    P, lines = F.unwrap(s, img)
+    tik, lams[name] = best(P, lines, L, Tc, **kw)
+    res[name] = F.wrap(s, F.dpir(*F.operator(s, L, Tc, lines, **kw), P))
+    print(f"{name:24s} {F.score(s, tik)[0]:8.2f} dB  lam {lams[name]:.0e} {F.score(s, res[name])[0]:10.2f} dB  SSIM {F.score(s, res[name])[1]:.3f}")
 short = "GS short (1 chip, x16)"
 res[short] = F.wrap(s, F.unwrap(s, caps["GS short"] / F.CHIP)[0])
-print(f"{short:24s}            PSNR {F.score(s, res[short])[0]:5.2f} dB")
+print(f"{short:24s} {F.score(s, res[short])[0]:8.2f} dB (no deblur)")
 
 # criterion 1: PSNR per band of sensor lines, first to last read
-print("\nPSNR by band of sensor lines (first read -> last read)")
+print("\nDPIR PSNR by band of sensor lines (first read -> last read)")
 for name in list(res)[:3]:
     print(f"{name:24s} " + " ".join(f"{v:5.1f}" for v in F.bands(s, res[name])))
 
