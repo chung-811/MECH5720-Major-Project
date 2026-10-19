@@ -3,6 +3,6 @@
 ## Usage:
 The following bash command should be run on Raspberry Pi:
 ```bash
-python3  monitor-display.py paramaters.json
+DIAPLAY=:0 python coded_illumination.py params1.json
 ```
 
