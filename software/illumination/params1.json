@@ -1,6 +1,6 @@
 {
-  "sequence": "1011 0011 1010 0110",
-  "bit_duration_s": 0.5,
+  "sequence": "10110011101001101011001110100110",
+  "bit_duration_s": 0.1,
   "repeat": 1,
   "invert": false,
   "pre_roll_s": 1.0,
