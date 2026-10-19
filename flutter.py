@@ -11,8 +11,11 @@ Deblur model. Unwrapped about the hub, the fan turns by omega t along theta, so 
 which is one ring matrix A per radius. Global shutter: the same w for every sample (circulant).
 Rolling shutter per-row: w from the sample's own sensor row. Per-frame: one row's w for all samples.
 """
+from types import SimpleNamespace
+
 import numpy as np
 from scipy.ndimage import map_coordinates
+from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similarity as ssim
 
 CHIP = 1 / 60                                               # one monitor refresh
 RASKAR52 = "1010000111000001010000110011110111010111001001100111"   # Raskar 2006, sec 3.2
@@ -119,3 +122,28 @@ def speed(P, rows, t, dt, L, t_exp, omegas, lam, **kw):
         x = deblur(P, rows, t, dt, L, t_exp, om, lam, **kw)
         scores.append(np.clip(-x, 0, None).sum() / np.abs(x).sum())
     return omegas[int(np.argmin(scores))], np.array(scores)
+
+
+def load(path, r0=30):
+    """renders plus the unwrap grid, the ground truth through the same interpolation, and the fan mask"""
+    d = np.load(path)
+    s = SimpleNamespace(fr=d["frames"], t=d["t"], dt=float(d["dt"]), om=float(d["omega"]), ref=d["ref"])
+    s.H = s.ref.shape[0]
+    s.c = ((s.H - 1) / 2,) * 2
+    s.r = np.arange(r0, float(d["rim_px"]) - 2)
+    s.n = int(2 * np.pi * s.r[-1])
+    s.truth = cartesian(polar(s.ref, s.c, s.r, s.n)[0], s.c, s.r, s.ref.shape)
+    rr = np.hypot(*(np.mgrid[:s.H, :s.H] - s.c[0]))
+    s.mask = (rr >= s.r[0]) & (rr <= s.r[-1])
+    return s
+
+
+def capture(s, L, t_exp, flux, rng, t_line=0.0, gain=1.0, **noise):
+    """noisy image of the renders under brightness L. t_line 0 = global shutter"""
+    starts = np.arange(s.H) * t_line if t_line else [0.0]
+    return sensor(expose(s.fr, weights(s.t, s.dt, L, t_exp, starts)), flux, rng, gain=gain, **noise)
+
+
+def score(s, x):
+    """(PSNR, SSIM) against the ground truth over the fan"""
+    return psnr(s.truth[s.mask], x[s.mask], data_range=1), ssim(s.truth, x * s.mask, data_range=1)

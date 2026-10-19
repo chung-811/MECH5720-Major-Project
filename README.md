@@ -64,6 +64,11 @@ giving each row its own slice of one flashing monitor.
 uv sync
 blender -b -P blender/render_fan.py -- --rpm 2 --t_end 0.9 --dt 0.0041667 --out renders/fan.npz
 uv run python demo.py renders/fan.npz
+
+# robustness: finer sub-frames, smooth and 28BYJ-48 stepped
+blender -b -P blender/render_fan.py -- --rpm 2 --t_end 0.9 --dt 0.0020833 --out renders/fan480.npz
+blender -b -P blender/render_fan.py -- --rpm 2 --t_end 0.9 --dt 0.0020833 --steps_per_rev 2038 --out renders/fan480_steps.npz
+uv run python robust.py renders/fan480.npz renders/fan480_steps.npz
 ```
 
 | File | What |
@@ -71,6 +76,7 @@ uv run python demo.py renders/fan.npz
 | `blender/render_fan.py` | fan as sharp linear frames at t = (k + 0.5) dt, plus the t = 0 reference |
 | `flutter.py` | monitor code, row exposure weights, sensor noise, polar unwrap, ring deblur, blind speed |
 | `demo.py` | GS per-frame vs RS per-frame vs RS per-row, constant light, short exposure, speed estimate |
+| `robust.py` | PSNR cost of black level, LCD lag, code timing, hub centre error, stepper motion |
 
 One solver serves all three methods; they differ only in which exposure window each polar sample
 gets. Fan geometry and sensor noise numbers are placeholders until the fan and cameras are measured.

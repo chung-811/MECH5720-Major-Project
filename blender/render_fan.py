@@ -1,11 +1,3 @@
-"""Render a spinning fan as sharp sub-frames. Runs inside Blender:
-
-    blender -b -P blender/render_fan.py -- --rpm 2 --t_end 0.9 --dt 0.008 --out renders/fan.npz
-
-Frame k is the fan at t = (k + 0.5) dt, angle = omega t, counter-clockwise on screen.
-`ref` is the fan at t = 0. Images are linear albedo, top row first, hub at the image centre.
-Workbench flat shading: no lighting, no noise. Light and noise are added later in flutter.py.
-"""
 import argparse
 import math
 import sys
@@ -28,6 +20,7 @@ ap.add_argument("--rpm", type=float, default=2.0)
 ap.add_argument("--t_end", type=float, default=0.9)
 ap.add_argument("--dt", type=float, default=1 / 120)
 ap.add_argument("--size", type=int, default=400)
+ap.add_argument("--steps_per_rev", type=float, default=0, help="0 = smooth, 2038 = 28BYJ-48 full steps")
 ap.add_argument("--out", default="renders/fan.npz")
 a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
 
@@ -110,7 +103,11 @@ def render(theta):
 
 omega = a.rpm * 2 * math.pi / 60
 t = (np.arange(math.ceil(a.t_end / a.dt)) + 0.5) * a.dt
-frames = np.stack([render(omega * tk) for tk in t])
+theta = omega * t
+if a.steps_per_rev:                          # stop-start: hold each step until the next is due
+    step = 2 * math.pi / a.steps_per_rev
+    theta = np.floor(theta / step) * step
+frames = np.stack([render(th) for th in theta])
 out = Path(a.out)
 out.parent.mkdir(parents=True, exist_ok=True)
 np.savez(out, frames=frames, t=t, dt=a.dt, omega=omega, ref=render(0.0),
