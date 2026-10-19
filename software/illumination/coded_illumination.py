@@ -11,41 +11,46 @@ Over SSH, tell it which display to draw on:
 
     DISPLAY=:0 python3 coded_illumination.py params1.json
 
-Parameters (all optional except "sequence"; defaults in brackets)
------------------------------------------------------------------
-    sequence          the code. A string such as "1011001110" (spaces, commas
-                      and underscores are ignored) or a list [1,0,1,1,...].
-                      1 = white, 0 = black.                        [required]
-    bit_duration_s    how long each bit is displayed, in seconds.       [0.5]
-    repeat            how many times the whole sequence is played.        [1]
-    invert            true = swap black and white.                    [false]
-    pre_roll_s        seconds of black before the sequence starts.      [1.0]
-    post_roll_s       seconds of black after the sequence ends.         [1.0]
-    end_color         "black" or "white", held after the run ends.  ["black"]
-    wait_for_start    true = show a prompt and wait for ENTER (on the
-                      screen, or in the SSH terminal; 'q' + ENTER
-                      aborts). false = start immediately.             [true]
+Parameters (all optional except "sequence" and "total_duration_s")
+------------------------------------------------------------------
+    sequence            the code. A string such as "1011001110" (spaces,
+                        commas and underscores are ignored) or a list
+                        [1,0,1,1,...]. 1 = white, 0 = black.      [required]
+    total_duration_s    how long the whole run of bits is displayed, in
+                        seconds, counting every repeat. Each bit is shown
+                        for total_duration_s / (number of bits).   [required]
+    repeat              how many times the sequence is played.          [1]
+    invert              true = swap black and white.                [false]
+    pre_roll_s          seconds of black before the sequence.         [1.0]
+    post_roll_s         seconds of black after the sequence.          [1.0]
+    end_color           "black" or "white", held after the run.   ["black"]
+    wait_for_start      true = show a prompt and wait for ENTER (on the
+                        screen, or in the SSH terminal; 'q' + ENTER
+                        aborts). false = start immediately.          [true]
 
-    capture           true = record raw frames from the Pi camera while the
-                      sequence plays. false = display only.          [false]
-    out_path          folder for the captured DNG files and run_log.json.
-                                                           ["data/coded"]
-    frames_per_bit    frames recorded for each bit (capture only).        [1]
-    exposure_us       fixed exposure time in microseconds.          [20000]
-    analogue_gain     fixed analogue gain.                            [16.0]
-    settle_s          wait after each screen change before recording
-                      (capture only).                                [0.05]
-    discard_frames    frames thrown away after each change, in case the
-                      camera still shows the previous bit.            [2]
+    capture             true = take ONE raw photo whose exposure covers the
+                        whole sequence. false = display only.       [false]
+    out_path            folder for the DNG and its run log.  ["data/coded"]
+    analogue_gain       fixed analogue gain. Keep it low: the exposure is as
+                        long as the whole sequence.                   [1.0]
+    exposure_padding_s  extra exposure added on top of total_duration_s, to
+                        absorb small start/stop sync errors.          [0.0]
+
+Camera exposure
+---------------
+With capture on, the exposure time is set automatically to
+total_duration_s + exposure_padding_s, so the single frame integrates every
+flash in the sequence. The camera free-runs, so the script first waits for a
+frame boundary, then starts the sequence straight away; the exposure begins
+within a few milliseconds of the first bit. If the camera cannot do an
+exposure that long, the script stops before flashing anything and says what
+the camera actually delivered.
 
 Timing notes
 ------------
-Bit changes are scheduled against a single start time (t0 + i * duration), so
-timing errors do not accumulate. The screen itself can only change on a
-display refresh, so the real resolution is one refresh period (about 16.7 ms
-at 60 Hz): use durations that are a whole number of refreshes. If capture is
-on, settle_s + frames_per_bit * (frame time) must fit inside bit_duration_s,
-otherwise bits are shown late; the script counts and reports this.
+Bit changes are scheduled against one start time (t0 + i * duration), so
+errors do not accumulate. The screen only changes on a display refresh, so
+the real resolution is one refresh period (about 16.7 ms at 60 Hz).
 
 Press ESC on the illumination screen, or Ctrl-C in the terminal, to stop a
 run early.
@@ -72,7 +77,7 @@ import tkinter as tk
 
 DEFAULTS = {
     "sequence": None,
-    "bit_duration_s": 0.5,
+    "total_duration_s": None,
     "repeat": 1,
     "invert": False,
     "pre_roll_s": 1.0,
@@ -81,21 +86,13 @@ DEFAULTS = {
     "wait_for_start": True,
     "capture": False,
     "out_path": "data/coded",
-    "frames_per_bit": 1,
-    "exposure_us": 20000,
-    "analogue_gain": 16.0,
-    "settle_s": 0.05,
-    "discard_frames": 2,
+    "analogue_gain": 1.0,
+    "exposure_padding_s": 0.0,
 }
 
-# Photosensitivity warning threshold: flashes (white pulses) per second.
-WARN_FLASH_HZ = 3.0
-
-# Camera buffers. Kept small on purpose: they come from a small pool of
-# GPU/display-shared memory on the Pi, which the fullscreen window also needs.
-CAMERA_BUFFER_COUNT = 2
-WRITE_WORKERS = 3
-WRITE_QUEUE_DEPTH = 4
+WARN_FLASH_HZ = 3.0        # photosensitivity warning threshold
+REFRESH_S = 1.0 / 60.0     # assumed display refresh period
+CAMERA_BUFFER_COUNT = 2    # small on purpose: shared GPU/display memory
 
 
 def parse_sequence(seq):
@@ -139,24 +136,28 @@ def load_params(path):
 
     def need(name, kind, low, strict=False):
         v = p[name]
+        if v is None:
+            raise ValueError('"%s" is required' % name)
         if isinstance(v, bool) or not isinstance(v, kind):
             raise ValueError('"%s" must be a number' % name)
         if v < low or (strict and v == low):
             raise ValueError('"%s" must be %s %s' % (name, ">" if strict else ">=", low))
 
-    need("bit_duration_s", (int, float), 0, strict=True)
+    need("total_duration_s", (int, float), 0, strict=True)
     need("repeat", int, 1)
     need("pre_roll_s", (int, float), 0)
     need("post_roll_s", (int, float), 0)
-    need("frames_per_bit", int, 1)
-    need("exposure_us", int, 1)
     need("analogue_gain", (int, float), 0, strict=True)
-    need("settle_s", (int, float), 0)
-    need("discard_frames", int, 0)
+    need("exposure_padding_s", (int, float), 0)
 
     if str(p["end_color"]).lower() not in ("black", "white"):
         raise ValueError('"end_color" must be "black" or "white"')
     p["end_color"] = str(p["end_color"]).lower()
+
+    # Derived values.
+    p["n_bits"] = len(p["bits"]) * p["repeat"]
+    p["bit_duration_s"] = float(p["total_duration_s"]) / p["n_bits"]
+    p["exposure_us"] = int(round((p["total_duration_s"] + p["exposure_padding_s"]) * 1e6))
 
     return p
 
@@ -287,109 +288,95 @@ class LightStage:
 # ======================================================================
 
 def open_camera(exposure_us, gain):
-    """Open the Pi camera for raw capture with everything held fixed.
+    """Open the Pi camera for raw capture with a fixed, long exposure.
 
-    Auto-exposure and auto-white-balance are off: anything that adapts
-    between frames breaks the linear relationship that decoding relies on.
-    Returns None if no camera is available (the script then just displays
-    the code).
+    Auto-exposure and auto-white-balance are off. FrameDurationLimits is set
+    equal to the exposure, because a frame cannot be shorter than its
+    exposure, and the default limits would cap the exposure far below the
+    length of a typical sequence.
+
+    Returns None if no camera is available (the code is then just displayed).
     """
     try:
         from picamera2 import Picamera2
         cam = Picamera2()
     except Exception as err:
         print("\n*** No camera available: %s" % err)
-        print("*** The code will be displayed, but no frames will be saved.\n")
+        print("*** The code will be displayed, but nothing will be saved.\n")
         return None
 
     cfg = cam.create_still_configuration(
         raw={"format": "SBGGR10", "size": cam.sensor_resolution},
-        buffer_count=CAMERA_BUFFER_COUNT)
+        buffer_count=CAMERA_BUFFER_COUNT,
+        controls={
+            "AeEnable": False,
+            "AwbEnable": False,
+            "AnalogueGain": float(gain),
+            "ExposureTime": int(exposure_us),
+            "FrameDurationLimits": (int(exposure_us), int(exposure_us)),
+        })
     cam.configure(cfg)
-    cam.set_controls({
-        "AeEnable": False,
-        "AwbEnable": False,
-        "AnalogueGain": float(gain),
-        "ExposureTime": int(exposure_us),
-    })
     cam.start()
-    time.sleep(2.0)          # let the pipeline settle on the fixed values
     return cam
 
 
-def grab_capture(cam, discard):
-    """Capture one raw frame as (array, metadata), releasing the request
-    straight away so camera buffers are never held during a slow disk write.
+def sync_to_frame_boundary(cam, exposure_us, max_tries=8):
+    """Wait for a frame to finish, so the NEXT frame starts right now.
+
+    The camera free-runs with back-to-back frames of length ~exposure, so
+    the instant a frame is delivered is (to within a few ms) the instant the
+    next exposure begins. Starting the sequence at that instant makes the
+    next frame cover the whole sequence.
+
+    Also checks the exposure the camera actually used. If it settles below
+    the request, the camera is clamping the exposure, and this raises before
+    anything is flashed.
     """
-    if cam is None:
-        return None
-    for _ in range(discard):
-        cam.capture_array("raw")
-    request = cam.capture_request()
-    try:
-        array = request.make_array("raw").copy()
-        metadata = request.get_metadata()
-    finally:
-        request.release()
-    return array, metadata
+    frame_s = exposure_us / 1e6
+    prev = None
+    for _ in range(max_tries):
+        t = time.perf_counter()
+        req = cam.capture_request()
+        try:
+            got = req.get_metadata().get("ExposureTime", 0)
+        finally:
+            req.release()
+        blocked = time.perf_counter() - t
+
+        if got >= 0.98 * exposure_us:
+            if blocked >= 0.5 * frame_s:      # a live boundary, not a stale queued frame
+                return got
+        elif prev is not None and got == prev:
+            raise RuntimeError(
+                "the camera is limiting the exposure to %.3f s but %.3f s was "
+                "requested. Shorten total_duration_s (and exposure_padding_s)."
+                % (got / 1e6, frame_s))
+        prev = got
+    raise RuntimeError("could not synchronise to the camera's frame boundary")
 
 
-def save_frame(cam, array, metadata, raw_config, out_path, name, index):
-    """Write one frame as a DNG (untouched sensor raw plus its metadata)."""
-    cam.helpers.save_dng(
-        array, metadata, raw_config,
-        os.path.join(out_path, "%s%04d.dng" % (name, index)))
+def start_frame_grabber(cam):
+    """Collect the next completed frame on a background thread.
 
+    Returns (thread, box); box gets "array" and "metadata", or "error".
+    The request is released as soon as the pixels are copied out.
+    """
+    box = {}
 
-class AsyncFrameWriter:
-    """Background DNG writer so the flashing never waits on disk I/O."""
-
-    def __init__(self, cam, raw_config, out_path,
-                 n_workers=WRITE_WORKERS, depth=WRITE_QUEUE_DEPTH):
-        os.makedirs(out_path, exist_ok=True)
-        self.cam = cam
-        self.raw_config = raw_config
-        self.out_path = out_path
-        self.q = queue.Queue(maxsize=depth)
-        self.errors = []
-        self._lock = threading.Lock()
-        self.workers = [threading.Thread(target=self._run, daemon=True)
-                        for _ in range(n_workers)]
-        for w in self.workers:
-            w.start()
-
-    def _run(self):
-        while True:
-            item = self.q.get()
-            if item is None:
-                self.q.task_done()
-                return
-            array, metadata, name, index = item
+    def run():
+        try:
+            req = cam.capture_request()
             try:
-                save_frame(self.cam, array, metadata, self.raw_config,
-                           self.out_path, name, index)
-            except Exception as err:
-                with self._lock:
-                    self.errors.append("%s%04d: %s" % (name, index, err))
+                box["array"] = req.make_array("raw").copy()
+                box["metadata"] = req.get_metadata()
             finally:
-                self.q.task_done()
+                req.release()
+        except Exception as err:
+            box["error"] = str(err)
 
-    def put(self, array, metadata, name, index):
-        self.q.put((array, metadata, name, index))
-
-    def pending(self):
-        return self.q.qsize()
-
-    def close(self):
-        self.q.join()
-        for _ in self.workers:
-            self.q.put(None)
-        for w in self.workers:
-            w.join()
-        if self.errors:
-            print("\n  *** %d frame(s) failed to write:" % len(self.errors))
-            for e in self.errors[:10]:
-                print("      %s" % e)
+    th = threading.Thread(target=run, daemon=True)
+    th.start()
+    return th, box
 
 
 # ======================================================================
@@ -410,81 +397,88 @@ def wait_until(stage, t):
 
 
 def play(stage, cam, params):
-    """Display the sequence (and record it, if a camera is open).
+    """Display the sequence, recording one long exposure if a camera is open.
 
-    Returns a log dict describing what was shown and when.
+    Returns (log, frame) where frame is {"array", "metadata"} or None.
     """
     bits = params["bits"] * params["repeat"]
     if params["invert"]:
         bits = [1 - b for b in bits]
-    dur = float(params["bit_duration_s"])
+    dur = params["bit_duration_s"]
     n = len(bits)
 
-    writer = None
-    raw_config = None
-    if cam is not None:
-        raw_config = cam.camera_configuration()["raw"]
-        writer = AsyncFrameWriter(cam, raw_config, params["out_path"])
-
-    log = {"bits": [], "frames": [], "late_bits": 0}
-    frame_no = 0
+    log = {"bits": [], "late_bits": 0}
+    grabber = None
 
     stage.enable_escape_abort()
     stage.show(0)
     time.sleep(params["pre_roll_s"])
 
-    wall_start = time.time()
-    t0 = time.perf_counter() + 0.05          # small lead so bit 0 is not late
-    log["wall_clock_start"] = wall_start
+    if cam is not None:
+        print("  waiting for a camera frame boundary...")
+        used = sync_to_frame_boundary(cam, params["exposure_us"])
+        log["sync_exposure_us"] = used
+        grabber = start_frame_grabber(cam)      # this frame will cover the sequence
 
-    try:
-        for i, bit in enumerate(bits):
-            planned = t0 + i * dur
-            wait_until(stage, planned)
-            if stage.aborted:
-                print("  aborted from the illumination screen.")
-                break
+    log["wall_clock_start"] = time.time()
+    t0 = time.perf_counter() + 0.02              # small lead so bit 0 is not late
 
-            t_show = time.perf_counter()
-            stage.show(bit)
-            late = t_show - planned
-            if late > 0.010:
-                log["late_bits"] += 1
-            log["bits"].append({"index": i, "value": bit,
-                                "shown_at_s": round(t_show - t0, 4),
-                                "late_s": round(max(late, 0.0), 4)})
+    for i, bit in enumerate(bits):
+        planned = t0 + i * dur
+        wait_until(stage, planned)
+        if stage.aborted:
+            print("  aborted from the illumination screen.")
+            break
 
-            if writer is not None:
-                wait_until(stage, t_show + params["settle_s"])
-                for _ in range(params["frames_per_bit"]):
-                    t_cap = time.perf_counter()
-                    captured = grab_capture(cam, params["discard_frames"])
-                    array, metadata = captured
-                    frame_no += 1
-                    writer.put(array, metadata, "Coded", frame_no)
-                    log["frames"].append({"frame": frame_no, "bit_index": i,
-                                          "bit_value": bit,
-                                          "captured_at_s": round(t_cap - t0, 4)})
+        t_show = time.perf_counter()
+        stage.show(bit)
+        late = t_show - planned
+        if late > 0.010:
+            log["late_bits"] += 1
+        log["bits"].append({"index": i, "value": bit,
+                            "shown_at_s": round(t_show - t0, 4),
+                            "late_s": round(max(late, 0.0), 4)})
 
-            if (i + 1) % 10 == 0 or i + 1 == n:
-                print("  %4d / %4d bits shown  (%.1f s elapsed)"
-                      % (i + 1, n, time.perf_counter() - t0))
+        if (i + 1) % 10 == 0 or i + 1 == n:
+            print("  %4d / %4d bits shown  (%.1f s elapsed)"
+                  % (i + 1, n, time.perf_counter() - t0))
+    else:
+        wait_until(stage, t0 + n * dur)         # last bit gets its full duration
 
-        else:
-            # Let the final bit be displayed for its full duration.
-            wait_until(stage, t0 + n * dur)
-
-        stage.show(0)
-        time.sleep(params["post_roll_s"])
-    finally:
-        if writer is not None:
-            t1 = time.time()
-            print("  flushing %d queued frame(s) to disk..." % writer.pending())
-            writer.close()
-            print("  writing finished in %.1f s" % (time.time() - t1))
-
+    stage.show(0)
     log["aborted"] = stage.aborted
-    return log
+
+    frame = None
+    if grabber is not None and not stage.aborted:
+        th, box = grabber
+        th.join(timeout=30.0)                    # exposure ends ~now; allow readout
+        if "array" in box:
+            frame = box
+        else:
+            print("\n*** No frame was captured: %s" % box.get("error", "timed out"))
+
+    time.sleep(params["post_roll_s"])
+    return log, frame
+
+
+def save_run(cam, params, log, frame):
+    """Write the DNG and a JSON log describing the run."""
+    os.makedirs(params["out_path"], exist_ok=True)
+    stem = time.strftime("coded_%Y%m%d_%H%M%S")
+    dng_path = os.path.join(params["out_path"], stem + ".dng")
+    log_path = os.path.join(params["out_path"], stem + ".json")
+
+    cam.helpers.save_dng(frame["array"], frame["metadata"],
+                         cam.camera_configuration()["raw"], dng_path)
+
+    meta = frame["metadata"]
+    log["actual_exposure_us"] = int(meta.get("ExposureTime", 0))
+    log["actual_gain"] = float(meta.get("AnalogueGain", 0))
+    log["params"] = {k: v for k, v in params.items() if k != "bits"}
+    log["sequence_played"] = [b["value"] for b in log["bits"]]
+    with open(log_path, "w") as f:
+        json.dump(log, f, indent=2)
+    return dng_path, log_path
 
 
 # ======================================================================
@@ -506,31 +500,39 @@ def main():
 
     bits = params["bits"] * params["repeat"]
     dur = params["bit_duration_s"]
-    total_s = len(bits) * dur
+    total_s = params["total_duration_s"]
     shown = [1 - b for b in bits] if params["invert"] else bits
 
     print("Parameter file   %s" % args.params)
     print("Sequence         %s%s" % ("".join(map(str, params["bits"])),
                                       "  x%d" % params["repeat"] if params["repeat"] > 1 else ""))
     print("Bits shown       %d%s" % (len(bits), "  (inverted)" if params["invert"] else ""))
-    print("Bit duration     %.4f s  (%.2f bits/s)" % (dur, 1.0 / dur))
-    print("Run time         %.1f s (+ %.1f s pre/post roll)"
-          % (total_s, params["pre_roll_s"] + params["post_roll_s"]))
-    print("Camera capture   %s" % ("on -> %s" % params["out_path"] if params["capture"] else "off"))
+    print("Total duration   %.3f s  ->  %.4f s per bit (%.2f bits/s)"
+          % (total_s, dur, 1.0 / dur))
+    print("Pre/post roll    %.1f s / %.1f s" % (params["pre_roll_s"], params["post_roll_s"]))
+    if params["capture"]:
+        print("Camera           one exposure of %.3f s, gain %.1f -> %s"
+              % (params["exposure_us"] / 1e6, params["analogue_gain"], params["out_path"]))
+    else:
+        print("Camera           off")
 
-    # Worst-case flash rate: white pulses per second.
+    if dur < REFRESH_S:
+        print("\n*** WARNING: %.1f ms per bit is shorter than one refresh of a 60 Hz"
+              % (dur * 1000))
+        print("*** screen (%.1f ms). Bits will be dropped. Lengthen total_duration_s."
+              % (REFRESH_S * 1000))
+
     flashes = sum(1 for a, b in zip([0] + shown, shown) if b == 1 and a == 0)
     if flashes and flashes / total_s > WARN_FLASH_HZ:
-        print("\n*** WARNING: up to %.1f white flashes per second on average."
+        print("\n*** WARNING: about %.1f white flashes per second on average."
               % (flashes / total_s))
         print("*** Rapid flashing can trigger photosensitive seizures. Make sure")
         print("*** nobody who may be affected can see the screen.")
 
-    cam = None
-    if params["capture"]:
-        cam = open_camera(params["exposure_us"], params["analogue_gain"])
+    cam = open_camera(params["exposure_us"], params["analogue_gain"]) if params["capture"] else None
 
     stage = LightStage()
+    log, frame = None, None
     try:
         if params["wait_for_start"]:
             print("\nCover the rig, then press ENTER here in the terminal")
@@ -538,7 +540,7 @@ def main():
             ok = stage.wait_for_key(
                 "Press ENTER -- on this screen, or in your\n"
                 "SSH terminal -- to start.\n\n"
-                "%d bits, about %.0f seconds.\n"
+                "%d bits, %.1f seconds.\n"
                 "Type 'q' + ENTER in the terminal, or press ESC here, to abort."
                 % (len(bits), total_s))
             if not ok:
@@ -546,35 +548,38 @@ def main():
                 return 1
 
         print("\n--- running ---")
-        log = play(stage, cam, params)
+        log, frame = play(stage, cam, params)
 
         stage.show(1 if params["end_color"] == "white" else 0)
         time.sleep(0.5)
     except KeyboardInterrupt:
         print("\nInterrupted.")
         return 1
+    except RuntimeError as err:
+        print("\n*** %s" % err)
+        return 1
     finally:
         stage.close()
+        if log is None and cam is not None:     # leaving early: release the camera
+            cam.stop()
+
+    try:
+        if log["late_bits"]:
+            print("\n*** %d bit(s) were shown more than 10 ms late." % log["late_bits"])
+
+        if cam is not None and frame is not None:
+            dng_path, log_path = save_run(cam, params, log, frame)
+            got = int(frame["metadata"].get("ExposureTime", 0))
+            print("\nExposure used: %.3f s (requested %.3f s)"
+                  % (got / 1e6, params["exposure_us"] / 1e6))
+            print("Wrote %s\n      %s" % (dng_path, log_path))
+        elif params["capture"] and cam is None:
+            print("\nNo camera, so nothing was saved.")
+    finally:
         if cam is not None:
             cam.stop()
 
-    if log["late_bits"]:
-        print("\n*** %d bit(s) were shown more than 10 ms late. Increase"
-              % log["late_bits"])
-        print("*** bit_duration_s, or reduce frames_per_bit / discard_frames.")
-
-    if cam is not None:
-        log["params"] = {k: v for k, v in params.items() if k != "bits"}
-        log["sequence_played"] = shown
-        os.makedirs(params["out_path"], exist_ok=True)
-        log_path = os.path.join(params["out_path"], "run_log.json")
-        with open(log_path, "w") as f:
-            json.dump(log, f, indent=2)
-        print("\nWrote %d frame(s) and %s" % (len(log["frames"]), log_path))
-    elif params["capture"]:
-        print("\nNo camera, so nothing was saved.")
-
-    print("Done." if not log["aborted"] else "Stopped early.")
+    print("Stopped early." if log["aborted"] else "Done.")
     return 0
 
 

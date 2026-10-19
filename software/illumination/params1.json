@@ -1,6 +1,6 @@
 {
-  "sequence": "101100111010011010110011101001101011001110100110101100111010011010110011101001101011001110100110",
-  "bit_duration_s": 0.01,
+  "sequence": "1011 0011 1010 0110",
+  "total_duration_s": 8.0,
   "repeat": 1,
   "invert": false,
   "pre_roll_s": 1.0,
@@ -10,9 +10,6 @@
 
   "capture": false,
   "out_path": "data/coded",
-  "frames_per_bit": 1,
-  "exposure_us": 20000,
-  "analogue_gain": 16.0,
-  "settle_s": 0.05,
-  "discard_frames": 2
+  "analogue_gain": 1.0,
+  "exposure_padding_s": 0.0
 }
