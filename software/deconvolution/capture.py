@@ -6,6 +6,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.ndimage import binary_dilation
 
 import flutter as F
 import real
@@ -39,7 +40,7 @@ def deblur(img, calib, code, chip, t_exp, rpm, method, solver="dpir", lam=1e-2, 
     """(deblurred image, scene, rpm used). img: linear capture in raw sensor orientation"""
     readout = 0.0 if method == "global" else calib["readout_s"]
     if method != "global" and not readout:
-        raise SystemExit("rolling shutter methods need readout_s (first to last line, s) in the calibration")
+        raise SystemExit("rolling shutter methods need readout_s in the calibration: run calibrate.py readout")
     scene = scene_for(calib, img.shape, t_exp, chip, readout, rpm * 2 * np.pi / 60)
     L = brightness(scene, code, chip, t_exp, calib.get("monitor", {}))
     kw = dict(t_line=readout / scene.n_lines, per_row=method == "rs-row", ref_line=scene.n_lines // 2)
@@ -66,6 +67,18 @@ def outline(ax, calib):
     ax.plot(hc, hr, "r+", ms=12)
 
 
+def compare(x, scene, ref):
+    """(reference turned and scaled onto x, PSNR, SSIM, PSNR by band of sensor lines) over the blade.
+    The still is turned to where the deblurred blade is (real.align) and given one gain fitted to x, as
+    the two are exposed differently; units are fractions of white, as in the simulation"""
+    turned = real.align(ref, x, scene.hub, scene.r, scene.th)[0]
+    window = F.wrap(scene, np.ones((len(scene.r), len(scene.th)))) > 0.5
+    turned = turned * (x[window] @ turned[window]) / (turned[window] @ turned[window])
+    scene.truth = turned
+    scene.mask = window & binary_dilation(turned > 0.1 * np.percentile(turned[window], 99), iterations=5)
+    return turned, *F.score(scene, x), F.bands(scene, x)
+
+
 def show(img, ax, title):
     ax.imshow(img, cmap="gray", vmin=0, vmax=max(np.percentile(img, 99.5), 1e-6))
     ax.set_title(title, fontsize=9)
@@ -84,6 +97,8 @@ def main(method):
     ap.add_argument("--lam", type=float, default=1e-2, help="tikhonov regularisation weight")
     ap.add_argument("--find-speed", action="store_true",
                     help="estimate the speed blind (within 20%% of --rpm) and deblur at the estimate")
+    ap.add_argument("--reference", help="still of the stopped blade (constant light): reports PSNR, SSIM and PSNR "
+                    "by band of sensor lines, and mean +- std over all the captures")
     ap.add_argument("--check", action="store_true", help="only draw the calibrated hub and arc on each capture")
     ap.add_argument("--out", default="out", help="output folder")
     args = ap.parse_args()
@@ -92,8 +107,10 @@ def main(method):
 
     calib = json.loads(Path(args.calib).read_text())
     dark = real.mean_frames(real.files(args.dark)) if args.dark else 0.0
+    ref = real.load_dng(args.reference) - dark if args.reference else None
     out = Path(args.out)
     out.mkdir(exist_ok=True)
+    scores, band_scores, speeds = [], [], []
     for path in map(Path, real.files(args.dng)):
         img = real.load_dng(path) - dark
         stem = out / f"{path.stem}_{method}"
@@ -112,10 +129,26 @@ def main(method):
         print(f"{path.name}: {len(code)} bits of {chip * 1e3:.1f} ms, exposure {t_exp:.3f} s, {method}, {args.solver}")
         x, scene, rpm = deblur(img, calib, code, chip, t_exp, args.rpm, method, args.solver, args.lam, args.find_speed)
         np.save(f"{stem}.npy", x)
-        fig, ax = plt.subplots(1, 2, figsize=(14, 5))
+        speeds.append(rpm)
+        fig, ax = plt.subplots(1, 3 if ref is not None else 2, figsize=(21 if ref is not None else 14, 5))
         show(img, ax[0], f"{path.name} (capture)")
         show(np.clip(x, 0, None), ax[1], f"deblurred, {method}, {args.solver}, {rpm:.3f} rpm")
         outline(ax[0], calib)
+        if ref is not None:
+            truth, p, q, b = compare(x, scene, ref)
+            scores.append((p, q))
+            band_scores.append(b)
+            show(truth, ax[2], "reference, turned to the blade")
+            print(f"  PSNR {p:.2f} dB, SSIM {q:.3f}, by band of sensor lines " + " ".join(f"{v:5.1f}" for v in b))
         fig.savefig(f"{stem}.png", dpi=100, bbox_inches="tight")
         plt.close("all")
         print(f"  {stem}.png, {stem}.npy")
+    if len(speeds) > 1 and args.find_speed:
+        print(f"blind speed over {len(speeds)} captures: {np.mean(speeds):.3f} +- {np.std(speeds):.3f} rpm "
+              f"(commanded {args.rpm:.3f})")
+    if len(scores) > 1:
+        p, q = np.array(scores).T
+        b = np.array(band_scores)
+        print(f"over {len(scores)} captures: PSNR {p.mean():.2f} +- {p.std():.2f} dB, SSIM {q.mean():.3f} +- {q.std():.3f}")
+        print("PSNR by band, mean   " + " ".join(f"{v:5.1f}" for v in np.nanmean(b, 0)))
+        print("PSNR by band, std    " + " ".join(f"{v:5.1f}" for v in np.nanstd(b, 0)))

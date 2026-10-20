@@ -172,3 +172,68 @@ def test_scripts_run_on_a_rig_capture(tmp_path):
     run("rolling-shutter-per-row.py", DNG, "--calib", calib, "--rpm", 2.8, "--solver", "tikhonov", "--out", tmp_path)
     x = np.load(tmp_path / f"{DNG.stem}_rs-row.npy")
     assert x.shape == (972, 1296) and np.isfinite(x).all() and (x != 0).sum() > 1000
+
+
+def test_check_bits_flags_a_doubled_bit():
+    dt = CHIP / 16
+    t = (np.arange(int(np.ceil(T_EXP / dt))) + 0.5) * dt
+    clean = F.lcd(F.light(t, CODE, CHIP, black=0.04), dt, 3e-3)
+    assert real.check_bits(clean, t, CODE, CHIP, 0.04, 0.0) == []
+    i = next(k for k in range(len(CODE) - 1) if CODE[k] != CODE[k + 1])       # bit 6: 1 then 0
+    bad = CODE[:i + 1] + CODE[i] + CODE[i + 2:]                               # 6 shown twice, 7 skipped
+    L = F.lcd(F.light(t, bad, CHIP, black=0.04), dt, 3e-3)
+    assert real.check_bits(L, t, CODE, CHIP, 0.04, 0.0) == [i + 1]
+
+
+@pytest.mark.parametrize("black,tau", [(0.0, 0.0), (0.03, 3e-3)])
+def test_fit_readout_recovers_line_time_and_start(black, tau):
+    """still scene under the code and under constant light on a rolling shutter, exposure = code length,
+    the code starting 21 ms after the first line opens (as coded_illumination.py does)"""
+    readout, t0, rows = 0.0632, 0.021, 240
+    rng = np.random.default_rng(0)
+    scene = 0.2 + 0.6 * rng.random((rows, 1)) * np.ones((1, 160))           # a different shade on every row
+    dt = CHIP / 64
+    t = np.arange(-0.1, T_EXP + 0.3, dt)
+    starts = np.arange(rows) * readout / rows
+    shot = lambda c: scene * (F.weights(t, dt, F.lcd(F.light(t, c, CHIP, black, t0), dt, tau) if tau else
+                                       F.light(t, c, CHIP, black, t0), T_EXP, starts).sum(1))[:, None]
+    coded = shot(CODE) * (1 + 0.005 * rng.standard_normal((rows, 160)))
+    const = shot("1" * len(CODE)) * (1 + 0.005 * rng.standard_normal((rows, 160)))
+    ro, t0_fit, rms, spread = real.fit_readout(coded, const, CODE, CHIP, T_EXP, 0, black, tau)
+    assert abs(ro / readout - 1) < 0.02 and abs(t0_fit - t0) < 1e-3 and rms < 0.2 * spread, (ro, t0_fit, rms, spread)
+
+
+def test_align_turns_the_reference_to_the_blade():
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    turn = 0.9                                                                 # rad, counter-clockwise
+    ref, x = blade(rows, cols, START + turn), blade(rows, cols, START)
+    scene = grid(0.0, [0.0], 1.0)
+    turned, angle = real.align(ref, x, HUB, scene.r, scene.th)
+    inside = F.wrap(scene, np.ones((len(scene.r), len(scene.th)))) > 0.5
+    same_path = F.wrap(scene, F.unwrap(scene, x)[0])                           # x through the same resampling
+    assert abs(angle - turn) < 0.01 and np.abs(turned - same_path)[inside].mean() < 0.01, angle
+
+
+def test_find_hub_from_two_stills():
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    turn = np.radians(10)
+    f0, f1 = blade(rows, cols, START), blade(rows, cols, START + turn)
+    scene = grid(0.0, [0.0], 1.0)
+    th = np.arange(START - HALF - 0.3, START + HALF + 0.3, scene.dtheta)
+    hub = real.find_hub(f0, f1, turn, (HUB[0] + 8, HUB[1] - 6), scene.r, th)
+    assert np.hypot(hub[0] - HUB[0], hub[1] - HUB[1]) < 0.5, hub
+
+
+def test_reference_scoring_ignores_the_still_angle_and_exposure():
+    """a still of the stopped blade at another angle and half the brightness scores the deblur as the true
+    scene does. Not exactly: the still is sampled on the pixel grid at another angle, which moved PSNR by
+    0.3-0.6 dB here (SSIM 0.0002), the same for every method. Unturned, the still's blade is not in the arc"""
+    img, truth = simulate()
+    rpm = OMEGA * 60 / (2 * np.pi)
+    x, scene, _ = capture.deblur(img, calib(), CODE, CHIP, T_EXP, rpm, "global", "tikhonov", 1e-3)
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    _, p_true, q_true, _ = capture.compare(x, scene, truth)
+    turned, p_still, q_still, _ = capture.compare(x, scene, 0.5 * blade(rows, cols, START + 1.0))
+    inside = F.wrap(scene, np.ones((len(scene.r), len(scene.th)))) > 0.5
+    assert np.corrcoef(turned[inside], truth[inside])[0, 1] > 0.99
+    assert p_true > 25 and abs(p_still - p_true) < 1 and abs(q_still - q_true) < 0.005, (p_true, p_still)

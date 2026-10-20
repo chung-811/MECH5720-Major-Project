@@ -8,7 +8,8 @@ from scipy.signal import savgol_filter
 
 import flutter as F
 
-# real captures: linear raw loading, hub calibration from two stepped frames, light waveform from an edge
+# real captures: raw loading, hub from two stepped stills, monitor light from a blade edge and a bit check,
+# rolling shutter readout from a still scene, and turning the reference still to the deblurred blade
 
 
 def files(patterns):
@@ -110,3 +111,70 @@ def fit_monitor(L, t, dt, code, chip=F.CHIP):
                 best = (err, black, tau, t0)
     _, black, tau, t0 = best
     return (black, tau, t0), F.lcd(F.light(t, code, chip, black=black, t0=t0), dt, tau)
+
+
+def check_bits(L, t, code, chip, black, t0):
+    """indices of bits the measured light L shows wrongly: the mean over the second half of each bit
+    (past the LCD's rise) against half way between black and white. A bit the screen showed twice and
+    the one it then skipped come out as a wrong bit"""
+    out = []
+    for i, c in enumerate(code):
+        sel = (t >= t0 + (i + 0.5) * chip) & (t < t0 + (i + 1) * chip)
+        if sel.any() and (L[sel].mean() > (1 + black) / 2) != (c == "1"):
+            out.append(i)
+    return out
+
+
+READOUT_MAX, T0_MAX = 0.15, 0.1          # s, fit_readout's search: past either, the fit is not trusted
+
+
+def fit_readout(coded, constant, code, chip, t_exp, axis=0, black=0.0, tau=0.0):
+    """(readout_s, t0, rms, spread) for a rolling shutter: first to last line, and when the code starts after the
+    first line opens. From a still scene shot once under the code and once under constant light (same
+    exposure, gain, code length). Their ratio cancels the scene, leaving per line the share of light its
+    window caught; line l opens at l readout / lines. Only measurable when lines catch the code differently
+    (exposure shorter than code + readout + t0); otherwise per-row and per-frame are the same anyway.
+    spread: std / mean of the measured ratio over lines, about 0 when it is not measurable"""
+    n = coded.shape[axis]
+    keep = constant > 0.1 * np.percentile(constant, 99)
+    num = np.where(keep, coded, 0).sum(1 - axis)
+    den = np.where(keep, constant, 0).sum(1 - axis)
+    ok = den > 0.2 * den.max()
+    lines, ratio = np.arange(n)[ok], num[ok] / den[ok]
+    dt = chip / 32
+    t = np.arange(-0.3, t_exp + 0.6, dt)
+    cum = lambda L: np.r_[0, np.cumsum(F.lcd(L, dt, tau) if tau else L)] * dt
+    edges = np.r_[t - dt / 2, t[-1] + dt / 2]
+    Cc, Cb = cum(F.light(t, code, chip, black)), cum(F.light(t, "1" * len(code), chip, black))
+    share = lambda C, a, t0: np.interp(a + t_exp - t0, edges, C) - np.interp(a - t0, edges, C)
+
+    def err(p, all_=False):
+        a = lines * p[0] / n
+        pred = share(Cc, a, p[1]) / np.maximum(share(Cb, a, p[1]), 1e-12)
+        k = pred @ ratio / (pred @ pred)                   # one free gain
+        return np.sqrt(np.mean((k * pred - ratio) ** 2))
+
+    grid = [(ro, t0) for ro in np.arange(0, READOUT_MAX, 0.001) for t0 in np.arange(-chip, T0_MAX, chip / 10)]
+    best = min(grid, key=err)
+    res = minimize(err, best, method="Nelder-Mead", options=dict(xatol=1e-5, fatol=1e-12))
+    return float(res.x[0]), float(res.x[1]), float(res.fun), float(ratio.std() / ratio.mean())
+
+
+def align(ref, x, hub, r, th):
+    """(reference turned to where the blade is in x, angle turned): a still of the stopped blade, rotated
+    about the hub by the angle that best matches x over the rings r and angles th (circular
+    cross-correlation of every ring, summed). Puts the ground truth where the deblurred blade is"""
+    dth = th[1] - th[0]
+    full = th[0] + np.arange(int(np.ceil(2 * np.pi / dth))) * dth
+    Px, Pr = F.polar(x, hub, r, th)[0], F.polar(ref, hub, r, full)[0]
+    Px = Px - Px.mean(1, keepdims=True)
+    Pr = Pr - Pr.mean(1, keepdims=True)
+    pad = np.zeros_like(Pr)
+    pad[:, :Px.shape[1]] = Px
+    corr = np.fft.irfft(np.conj(np.fft.rfft(pad)) * np.fft.rfft(Pr), Pr.shape[1]).sum(0)
+    s = int(np.argmax(corr))
+    a, b, c = corr[s - 1], corr[s], corr[(s + 1) % len(corr)]
+    d = a - 2 * b + c
+    shift = (s + (0.5 * (a - c) / d if d < 0 else 0.0)) * dth
+    turned = F.cartesian(F.polar(ref, hub, r, th + shift)[0], hub, r, th, x.shape)
+    return turned, (shift + np.pi) % (2 * np.pi) - np.pi

@@ -142,15 +142,24 @@ def _drunet():
     return dinv.models.DRUNet(in_channels=1, out_channels=1, pretrained="download", device="cpu")
 
 
+NOISE_GAIN = 6.0     # DPIR noise level / estimate_sigma on the polar data, see dpir
+
+
 def dpir(A, m, P, sigma=None, full=False):
     """plug-and-play deblur: DPIR (HQS with a pretrained DRUNet denoiser as the prior, Zhang et al.,
-    TPAMI 2022) through deepinv, on our forward model. sigma: noise in P, estimated from P when None.
-    full: return the whole polar estimate (R, N) instead of the window"""
+    TPAMI 2022) through deepinv, on our forward model. The model is first scaled to unit gain (a still
+    pixel keeps its value), which DPIR's noise-level schedule assumes; our simulations have gain 0.43
+    (26 on-bits x 1/60 s), real captures 1. sigma: the noise level DPIR uses, in units of P. When None:
+    estimate_sigma on the polar data reads 0.31-0.35 of the true noise (resampling smooths it; two scenes,
+    light 1x to 0.03x, both shutters), and DPIR did best at 2x the true noise in all of those and in OCR,
+    so NOISE_GAIN x the estimate. full: return the whole polar estimate (R, N) instead of the window"""
     import torch
     import deepinv as dinv
     R, n = P.shape
     N = A.shape[1] // R
-    sigma = float(estimate_sigma(P)) if sigma is None else sigma
+    g = float(np.asarray(A.sum(1)).mean())                   # gain: mean row sum of the forward model
+    A, P = A / g, P / g
+    sigma = NOISE_GAIN * float(estimate_sigma(P)) if sigma is None else sigma / g
     fwd = lambda X: torch.from_numpy(A @ X.numpy().ravel()).float().reshape(1, 1, R, n)
     adj = lambda Y: torch.from_numpy(A.T @ Y.numpy().ravel()).float().reshape(1, 1, R, N)
     with torch.no_grad():
