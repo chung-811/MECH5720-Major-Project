@@ -10,6 +10,8 @@ Requires: opencv-python, requests, glfw, pyopengl, imgui-bundle
 """
 
 import argparse
+import os
+import sys
 import threading
 import time
 
@@ -22,6 +24,10 @@ import OpenGL.GL as gl
 # --- CORRECTED IMPORTS ---
 from imgui_bundle import imgui
 from imgui_bundle.python_backends.glfw_backend import GlfwRenderer
+
+# Shared coded-capture GUI section lives in ../coded.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "coded"))
+from coded_client import CodedCaptureUI  # noqa: E402
 
 # Bytes-per-pixel for the pixel formats the server supports.
 BYTES_PER_PIXEL = {
@@ -318,6 +324,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="192.168.1.100")
     parser.add_argument("--port", default=8000, type=int)
+    parser.add_argument("--params-dir", default=None,
+                        help="folder of coded illumination .json files (default: ../coded/params)")
     args = parser.parse_args()
 
     base_url = f"http://{args.host}:{args.port}"
@@ -381,6 +389,8 @@ def main():
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
     gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
     gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGB, 1, 1, 0, gl.GL_RGB, gl.GL_UNSIGNED_BYTE, b'\x00\x00\x00')
+
+    coded_ui = CodedCaptureUI(base_url, "coded_rs_", args.params_dir)
 
     stream_url = f"{base_url}/video_feed"
     reader = FrameReader(stream_url)
@@ -554,6 +564,12 @@ def main():
         imgui.separator()
         imgui.spacing()
         
+        coded_ui.draw(set_status, camera_controls)
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.spacing()
+
         imgui.text("Actions")
         
         if imgui.button("Capture Debug Data"):

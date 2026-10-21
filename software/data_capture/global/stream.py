@@ -17,6 +17,10 @@ Endpoints:
   POST /config              -> change camera configuration (JSON body)
   GET  /capture_raw         -> single frame, bare raw bayer bytes (not openable by rawpy)
   GET  /capture_dng         -> single frame as a real Adobe DNG file (openable by rawpy)
+  POST /capture_coded       -> coded (flutter shutter) capture: flashes a light code on
+                               the Pi's monitor during one long exposure
+  GET  /coded_result/<id>/<dng|png> -> files from the last coded capture
+  GET  /coded_info          -> camera model, shutter type, readout/max exposure
   GET  /                    -> simple HTML page that shows the live stream
 
 Example POST body to /config:
@@ -31,6 +35,7 @@ import argparse
 import io
 import json
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -38,6 +43,11 @@ import time
 from flask import Flask, Response, jsonify, request, render_template_string
 from picamera2 import Picamera2
 import libcamera
+
+# Shared coded-capture code lives in ../coded (copy that folder to the Pi too).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "coded"))
+import coded_camera  # noqa: E402
+import coded_params  # noqa: E402
 
 app = Flask(__name__)
 
@@ -52,6 +62,12 @@ config_lock = threading.Lock()
 # configured at this size since the sensor has only one mode.
 SENSOR_SIZE = picam2.sensor_resolution
 print(f"Camera model: {picam2.camera_properties.get('Model')}, sensor size: {SENSOR_SIZE}")
+
+# Shutter type and full-resolution sensor mode, for coded capture. Probed
+# before the camera starts, since reading the sensor modes reconfigures it.
+SHUTTER = "global"
+CODED_INFO = coded_camera.sensor_info(picam2)
+print(f"Coded capture: {CODED_INFO}")
 
 current_config = {
     "width": 728,         # half of native 1456x1088 - keeps JPEG encoding cheap
@@ -344,6 +360,67 @@ def set_controls():
         except Exception as e:
             print(f"Error setting controls: {e}")
             return jsonify({"error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Coded (flutter shutter) capture - see ../coded/coded_camera.py
+# ---------------------------------------------------------------------------
+
+@app.route("/coded_info", methods=["GET"])
+def coded_info():
+    """Camera model, shutter type, readout estimate and max exposure."""
+    return jsonify(dict(CODED_INFO, shutter=SHUTTER))
+
+
+@app.route("/capture_coded", methods=["POST"])
+def capture_coded():
+    """
+    Flashes a light code on the Pi's monitor and takes ONE raw exposure that
+    covers all of it. Body: {"code": {...code file...}, "camera":
+    {"padding_s": ..., "readout_s": ...}}. Gain, colour gains etc. come from
+    the controls currently set from the GUI. Blocks for the length of the
+    code (the stream pauses meanwhile), then returns the run log plus an
+    "id" for GET /coded_result/<id>/dng and /coded_result/<id>/png.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        code = coded_params.parse_code_params(data.get("code"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    with config_lock:
+        picam2.stop()
+        try:
+            log, dng_bytes, png_bytes = coded_camera.run_coded_capture(
+                picam2, code, data.get("camera") or {}, CODED_INFO, SHUTTER, manual_controls)
+        except coded_camera.CodedAborted as e:
+            return jsonify({"error": str(e)}), 409
+        except Exception as e:
+            print(f"Coded capture failed: {e}")
+            return jsonify({"error": str(e)}), 500
+        finally:
+            # Back to streaming exactly as before the capture.
+            build_and_apply_config(
+                current_config["width"], current_config["height"], current_config["format"]
+            )
+            picam2.start()
+            if manual_controls:
+                picam2.set_controls(manual_controls)
+
+    log["id"] = coded_camera.store_result(dng_bytes, png_bytes)
+    return jsonify(log)
+
+
+@app.route("/coded_result/<rid>/<kind>", methods=["GET"])
+def coded_result(rid, kind):
+    """Downloads the DNG or PNG of a finished coded capture (once each)."""
+    if kind not in ("dng", "png"):
+        return jsonify({"error": "kind must be dng or png"}), 404
+    data = coded_camera.fetch_result(rid, kind)
+    if data is None:
+        return jsonify({"error": "no such result (already downloaded or expired)"}), 404
+    mimetype = "image/x-adobe-dng" if kind == "dng" else "image/png"
+    return Response(data, mimetype=mimetype)
 
 
 @app.route("/config", methods=["GET"])

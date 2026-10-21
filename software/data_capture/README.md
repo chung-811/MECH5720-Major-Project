@@ -7,12 +7,18 @@ software/data_capture/
 ├── rolling/              # Rolling shutter camera (OV5647)
 │   ├── stream.py         # server, runs on the Pi
 │   └── camview_capture.py  # client, runs on the development computer
-└── global/               # Global Shutter camera (Sony IMX296)
-    ├── stream.py
-    └── camview_capture.py
+├── global/               # Global Shutter camera (Sony IMX296)
+│   ├── stream.py
+│   └── camview_capture.py
+└── coded/                # coded illumination (flutter shutter) capture, shared by both
+    ├── coded_params.py   # code file parsing (both sides)
+    ├── coded_camera.py   # Pi side: long exposure synced to the code
+    ├── coded_display.py  # Pi side: fullscreen black/white on the Pi's monitor
+    ├── coded_client.py   # dev computer: "Coded Capture" GUI section
+    └── params/           # code files (.json)
 ```
 
-Each folder has the same pair of scripts: `stream.py` runs **on the Pi** and serves the camera over HTTP; `camview_capture.py` runs **on the development computer** and shows the live feed with controls for capturing frames. Captured DNGs can be viewed with [software/view_raw.py](../view_raw.py).
+`rolling/` and `global/` each have the same pair of scripts: `stream.py` runs **on the Pi** and serves the camera over HTTP; `camview_capture.py` runs **on the development computer** and shows the live feed with controls for capturing frames. Both import from `coded/`, so it must sit next to them on the Pi and the development computer. Captured DNGs can be viewed with [software/view_raw.py](../view_raw.py).
 
 All commands below are run from the repo root (`MECH5720-Major-Project/`) unless stated otherwise.
 
@@ -40,22 +46,28 @@ python -c "import numpy, skimage, rawpy, matplotlib, imgui_bundle; print('Enviro
 
 ## Pi setup
 
-The Pi needs `picamera2` and `flask` (usually already installed on the lab image):
+The Pi needs `picamera2`, `flask` and, for coded capture, Tkinter (usually already installed on the lab image):
 
 ```
-sudo apt install -y python3-picamera2
+sudo apt install -y python3-picamera2 python3-tk
 pip install flask --break-system-packages
 ```
 
 Username: `pi`, password: `mech5720`. Our Pi is `eb5234f9picam.local` (in general, `<ID_STRING>.local`).
 
-Copy both server folders to the Pi. Run this on the development computer:
+Copy the server folders to the Pi. Run this on the development computer:
 
 ```
-scp -r software/data_capture/rolling software/data_capture/global pi@eb5234f9picam.local:~/
+scp -r software/data_capture/rolling software/data_capture/global software/data_capture/coded pi@eb5234f9picam.local:~/
 ```
 
-This puts them at `~/rolling/` and `~/global/` on the Pi. Re-run it whenever you change either `stream.py`.
+This puts them at `~/rolling/`, `~/global/` and `~/coded/` on the Pi. Re-run it whenever you change any of them.
+
+Copying folders from Windows can leave them without write permission on the Pi (`dr-x------`), which makes later copies fail with `Permission denied`. After each `scp -r`, fix it on the Pi:
+
+```
+chmod -R u+w ~/rolling ~/global ~/coded
+```
 
 ## Capturing images
 
@@ -106,6 +118,33 @@ python software/data_capture/global/camview_capture.py --host localhost --port 8
 python software/view_raw.py captured_frame_<timestamp>.dng       # rolling
 python software/view_raw.py gs_captured_frame_<timestamp>.dng    # global
 ```
+
+## Coded capture (flutter shutter)
+
+Both clients have a **Coded Capture** section in the Stream Settings window. One click makes the Pi flash a black/white light code on **its own monitor**, so a monitor must be plugged into the Pi and facing the scene. During the flashing the Pi takes **one** long exposure that covers the whole code. The stream pauses for the length of the run and then resumes.
+
+**What sets what:**
+- **The light code** comes from a `.json` file in [coded/params/](coded/params/), picked from the *Code file* dropdown. The files stay on the development computer; the client sends their contents with each run. Keys: `sequence` (e.g. `"1011 0011"`), `total_duration_s`, and optionally `repeat`, `invert`, `pre_roll_s` (black before, default 1.0) and `post_roll_s` (black after, default 0.5). Add new files to the folder, then click **Reload**.
+- **Camera settings** come from the GUI. Set `AnalogueGain` (and `ColourGains` if wanted) in **Advanced Camera Controls**, as usual; exposure is set automatically. The Coded Capture section adds:
+  - **Padding (s)**: extra exposure to absorb timing jitter (default 0.05 s).
+  - **Readout time (s)**: prefilled from the sensor's full-resolution mode.
+
+The exposure is `total_duration_s + readout + padding`. When the code starts, the camera's next exposure has already been running for about one readout time. On the rolling shutter camera this is also the delay between the top and bottom rows starting. Adding the readout time therefore makes every row see the full code, followed by black. Cover the rig or darken the room, because any other light during the extra exposure ends up in the image. The exposure line turns red if it's longer than the camera allows, and the Pi refuses the run before flashing anything.
+
+**Steps:**
+1. Start `stream.py` and the client as in [Capturing images](#capturing-images). Use the matching pair: `rolling/` for the OV5647, `global/` for the IMX296.
+2. Frame and focus the scene, and set the gain in Advanced Camera Controls.
+3. Open **Coded Capture**, pick a code file, check the summary and exposure, and click **Run Coded Capture**. Warn anyone who can see the Pi's screen: codes faster than about 3 flashes/s are flagged in orange.
+4. Press `ESC` on the Pi's screen to stop a run early.
+
+**Output**, saved in the directory you started the client from (`coded_gs_` for global, `coded_rs_` for rolling):
+- `coded_gs_<timestamp>.dng`: the raw exposure, for deconvolution (`python software/view_raw.py ...`)
+- `coded_gs_<timestamp>.png`: the same exposure after the Pi's colour processing, for quick viewing
+- `coded_gs_<timestamp>.json`: the run log: code, bits actually shown with their timing (`late_bits`), requested and actual exposure, gain, camera model, shutter type, readout and padding
+
+[flat_1s.json](coded/params/flat_1s.json) (white for the whole run) is a useful first test. With it, a plain scene should come out evenly lit from top to bottom. If the top rows are darker on the rolling shutter camera, increase the readout time.
+
+The standalone [software/illumination/coded_illumination.py](../illumination/coded_illumination.py) still works on its own for flashing without the GUI.
 
 ## `camview_capture.py` controls
 
