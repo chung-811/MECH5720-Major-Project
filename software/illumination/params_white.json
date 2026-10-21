@@ -1,0 +1,8 @@
+{
+  "sequence": "1",
+  "total_duration_s": 300,
+  "pre_roll_s": 0,
+  "post_roll_s": 0,
+  "wait_for_start": false,
+  "capture": false
+}

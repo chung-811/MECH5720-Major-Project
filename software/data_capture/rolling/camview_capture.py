@@ -528,7 +528,18 @@ def main():
                     min_v = ctrl.get("min")
                     max_v = ctrl.get("max")
 
-                    if isinstance(curr, bool):
+                    if isinstance(min_v, bool) and not isinstance(curr, bool):
+                        # e.g. AwbEnable/AeEnable: the Pi doesn't report their state in
+                        # the frame metadata, so the server sends None. They default to on.
+                        curr = True if curr is None else bool(curr)
+
+                    if (isinstance(curr, list) and len(curr) == 2
+                            and all(isinstance(v, (int, float)) for v in curr)):
+                        # e.g. ColourGains (red, blue): setting it turns AWB off.
+                        changed, ctrl["current"] = imgui.input_float2(name, [float(v) for v in curr])
+                        if imgui.is_item_deactivated_after_edit():
+                            threading.Thread(target=set_camera_control_thread, args=(base_url, name, list(ctrl["current"])), daemon=True).start()
+                    elif isinstance(curr, bool):
                         changed, new_val = imgui.checkbox(name, curr)
                         if changed:
                             threading.Thread(target=set_camera_control_thread, args=(base_url, name, new_val), daemon=True).start()
