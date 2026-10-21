@@ -249,6 +249,20 @@ def _configure_still(picam2, controls):
     raise RuntimeError("could not configure the camera for coded capture: %s" % last_err)
 
 
+def _json_safe(value):
+    """Convert metadata/config values (tuples, numpy numbers, enums, ...)
+    into something json.dump accepts; anything unknown becomes a string."""
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, (bool, int, float, str)) or value is None:
+        return value
+    if hasattr(value, "tolist"):                 # numpy scalars and arrays
+        return _json_safe(value.tolist())
+    return str(value)
+
+
 def run_coded_capture(picam2, code, camera, info, shutter, manual_controls):
     """Run one coded capture. The camera must already be stopped; it is left
     stopped, and the caller restores its streaming configuration.
@@ -345,7 +359,9 @@ def run_coded_capture(picam2, code, camera, info, shutter, manual_controls):
         "sensor_timestamp_ns": meta.get("SensorTimestamp"),
         "frame_boundary_monotonic_ns": boundary_ns,
         "go_sent_monotonic_ns": go_ns,
-        "controls": {k: (list(v) if isinstance(v, tuple) else v) for k, v in controls.items()},
+        "controls": _json_safe(controls),
+        "raw_format": _json_safe(raw_config),    # Bayer format/bit depth, size, stride
+        "metadata": _json_safe(meta),            # everything libcamera reported for the frame
         "wall_clock": time.strftime("%Y-%m-%d %H:%M:%S"),
     })
     return log, dng_bytes, png.getvalue()

@@ -6,7 +6,9 @@ Pick a code file (light sequence only, see coded_params.py), set the camera
 side in the GUI (gain etc. via Advanced Camera Controls, plus padding and
 readout time here), and click Run Coded Capture. The Pi flashes the code on
 its monitor during one long exposure; the DNG, PNG and a JSON run log are
-saved to the current working directory as <prefix><timestamp>.{dng,png,json}.
+saved as <prefix><timestamp>.{dng,png,json} in a test folder inside the
+repo's output/ directory (e.g. output/test_gs_20261021_214500/), named in the
+GUI and created on the first save.
 """
 
 import glob
@@ -21,6 +23,9 @@ from imgui_bundle import imgui
 import coded_params
 
 DEFAULT_PARAMS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "params")
+# <repo>/output, from <repo>/software/data_capture/coded/
+OUTPUT_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                           "..", "..", "..", "output"))
 DEFAULT_PADDING_S = 0.05
 
 WARN = (0.95, 0.65, 0.2, 1.0)
@@ -43,6 +48,7 @@ class CodedCaptureUI:
         self.padding_s = DEFAULT_PADDING_S
         self.readout_s = 0.0
         self.running = False
+        self.test_name = self.new_test_name()
         self.reload_files()
         threading.Thread(target=self.fetch_info, daemon=True).start()
 
@@ -74,6 +80,15 @@ class CodedCaptureUI:
                 self.readout_s = float(self.info["readout_s"])
         except Exception as err:
             print("Failed to fetch /coded_info:", err)
+
+    def new_test_name(self):
+        """e.g. test_gs_20261021_214500 for prefix coded_gs_."""
+        tag = self.prefix.replace("coded_", "", 1).strip("_")
+        return "test_%s_%s" % (tag, time.strftime("%Y%m%d_%H%M%S"))
+
+    def test_dir(self):
+        name = self.test_name.strip() or self.new_test_name()
+        return os.path.join(OUTPUT_ROOT, name)
 
     def exposure_s(self):
         if self.code is None:
@@ -109,7 +124,9 @@ class CodedCaptureUI:
             log["code_file"] = code_file
 
             set_status("Coded capture: downloading...", BUSY)
-            stem = self.prefix + time.strftime("%Y%m%d_%H%M%S")
+            out_dir = self.test_dir()
+            os.makedirs(out_dir, exist_ok=True)
+            stem = os.path.join(out_dir, self.prefix + time.strftime("%Y%m%d_%H%M%S"))
             for kind in ("dng", "png"):
                 d = requests.get(f"{self.base_url}/coded_result/{log['id']}/{kind}", timeout=30)
                 d.raise_for_status()
@@ -119,7 +136,9 @@ class CodedCaptureUI:
                 json.dump(log, f, indent=2)
 
             got, req = log.get("actual_exposure_us", 0), log.get("requested_exposure_us", 0)
-            msg = "Saved %s.dng/.png/.json (exposure %.3f s of %.3f s" % (stem, got / 1e6, req / 1e6)
+            msg = "Saved %s.dng/.png/.json to %s (exposure %.3f s of %.3f s" % (
+                os.path.basename(stem), os.path.relpath(out_dir, os.path.dirname(OUTPUT_ROOT)),
+                got / 1e6, req / 1e6)
             msg += ", %d late bit(s))" % log["late_bits"] if log.get("late_bits") else ")"
             set_status(msg, WARN if log.get("late_bits") else GOOD)
             print(msg)
@@ -179,6 +198,13 @@ class CodedCaptureUI:
             if max_us:
                 text += "  (max %.3f s)" % (max_us / 1e6)
             imgui.text_colored(BAD if too_long else GOOD, text)
+
+        imgui.spacing()
+        _, self.test_name = imgui.input_text("Test folder", self.test_name)
+        imgui.same_line()
+        if imgui.button("New"):
+            self.test_name = self.new_test_name()
+        imgui.text_disabled("-> " + os.path.relpath(self.test_dir(), os.path.dirname(OUTPUT_ROOT)))
 
         imgui.begin_disabled(self.running or self.code is None)
         if imgui.button("Running..." if self.running else "Run Coded Capture"):

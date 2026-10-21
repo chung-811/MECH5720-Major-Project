@@ -137,7 +137,7 @@ The exposure is `total_duration_s + readout + padding`. When the code starts, th
 3. Open **Coded Capture**, pick a code file, check the summary and exposure, and click **Run Coded Capture**. Warn anyone who can see the Pi's screen: codes faster than about 3 flashes/s are flagged in orange.
 4. Press `ESC` on the Pi's screen to stop a run early.
 
-**Output**, saved in the directory you started the client from (`coded_gs_` for global, `coded_rs_` for rolling):
+**Output** is saved to a test folder inside the repo's `output/` directory. Each client session starts a new folder, `output/test_gs_<date>_<time>/` (or `test_rs_` for rolling), created when the first capture is saved. Rename it with the **Test folder** field, or click **New** to start another one; the path is shown under the field. The files are named `coded_gs_` for global and `coded_rs_` for rolling:
 - `coded_gs_<timestamp>.dng`: the raw exposure, for deconvolution (`python software/view_raw.py ...`)
 - `coded_gs_<timestamp>.png`: the same exposure after the Pi's colour processing, for quick viewing
 - `coded_gs_<timestamp>.json`: the run log: code, bits actually shown with their timing (`late_bits`), requested and actual exposure, gain, camera model, shutter type, readout and padding
