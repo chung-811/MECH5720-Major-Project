@@ -1,0 +1,13 @@
+glfw
+requests
+opencv-python
+Cython
+imgui_bundle[Cython]
+PyOpenGL
+numpy
+scikit-image
+rawpy
+matplotlib
+scipy
+pandas
+IPython
