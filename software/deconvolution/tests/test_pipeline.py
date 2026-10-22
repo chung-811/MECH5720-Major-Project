@@ -99,6 +99,19 @@ def test_rolling_shutter_per_row_beats_per_frame():
     assert row > frame + 3 and row > gs - 1, (row, frame, gs)
 
 
+def test_rolling_shutter_timing_from_the_run_log():
+    """no measured readout in the calibration: the run log's readout and code start stand in for it"""
+    readout = 4 * CHIP
+    img, _ = simulate(readout)
+    rpm = OMEGA * 60 / (2 * np.pi)
+    measured = capture.deblur(img, calib(readout), CODE, CHIP, T_EXP, rpm, "rs-row", "tikhonov", 1e-3)[0]
+    logged = capture.deblur(img, calib(), CODE, CHIP, T_EXP, rpm, "rs-row", "tikhonov", 1e-3,
+                            logged=dict(readout_s=readout, t0=0.0))[0]
+    assert np.allclose(measured, logged)
+    with pytest.raises(SystemExit):
+        capture.deblur(img, calib(), CODE, CHIP, T_EXP, rpm, "rs-row", "tikhonov", 1e-3)
+
+
 def test_dpir_runs_and_deblurs():
     """the real deepinv import and DRUNet weights (downloaded once), on a noisy capture"""
     img, truth = simulate()
@@ -150,6 +163,19 @@ def test_run_log(tmp_path):
     log.write_text(json.dumps(dict(sequence_played=[1, 0, 1, 1], actual_exposure_us=999852,
                                    params=dict(bit_duration_s=0.0625))))
     assert real.run_log(log) == ("1011", 0.0625, 0.999852)
+    assert real.log_timing(log) == {}
+
+
+def test_run_log_from_the_capture_gui(tmp_path):
+    """the json the data_capture GUI writes next to each DNG (the fields used, from a real OV5647 log)"""
+    log = tmp_path / "coded_rs.json"
+    log.write_text(json.dumps(dict(code=dict(bits=[1, 0, 1, 1], bit_duration_s=0.0625), actual_exposure_us=1113805,
+                                   readout_s=0.064, frame_boundary_monotonic_ns=655709467092,
+                                   t0_monotonic_ns=655730755946, late_bits=0, aborted=False)))
+    assert real.run_log(log) == ("1011", 0.0625, 1.113805)
+    timing = real.log_timing(log)
+    assert timing["readout_s"] == 0.064 and abs(timing["t0"] - (0.064 + 0.021288854)) < 1e-9
+    assert timing["late_bits"] == 0 and timing["aborted"] is False
 
 
 DNG = Path(__file__).parents[2] / "illumination/data/coded/coded_20261019_220955.dng"
@@ -168,7 +194,12 @@ def test_scripts_run_on_a_rig_capture(tmp_path):
     here = Path(__file__).parents[1]
     run = lambda *a: subprocess.run([sys.executable, *map(str, a)], cwd=here, check=True, capture_output=True)
     calib = tmp_path / "rs.json"
+    run("calibrate.py", "grid", DNG, "--out", tmp_path)
+    assert (tmp_path / f"{DNG.stem}_grid.png").exists()
     run("calibrate.py", "init", calib, "--hub", 480, 640, "--radius", 150, 200, "--arc", 200, 230, "--readout", 0.0632)
+    run("calibrate.py", "hub", calib, DNG, DNG, "--steps", 0, "--steps-per-rev", 2038)
+    with pytest.raises(subprocess.CalledProcessError):
+        run("calibrate.py", "hub", calib, DNG, DNG, "--steps", 100)       # steps need --steps-per-rev
     run("rolling-shutter-per-row.py", DNG, "--calib", calib, "--rpm", 2.8, "--solver", "tikhonov", "--out", tmp_path)
     x = np.load(tmp_path / f"{DNG.stem}_rs-row.npy")
     assert x.shape == (972, 1296) and np.isfinite(x).all() and (x != 0).sum() > 1000
@@ -237,3 +268,53 @@ def test_reference_scoring_ignores_the_still_angle_and_exposure():
     inside = F.wrap(scene, np.ones((len(scene.r), len(scene.th)))) > 0.5
     assert np.corrcoef(turned[inside], truth[inside])[0, 1] > 0.99
     assert p_true > 25 and abs(p_still - p_true) < 1 and abs(q_still - q_true) < 0.005, (p_true, p_still)
+
+
+def stills(turn, seed=0):
+    """two noisy stills of the stopped blade, turned by `turn` rad between them, with a static bright
+    patch in the background that must not pull the hub"""
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    rng = np.random.default_rng(seed)
+    f0, f1 = (blade(rows, cols, START + a) + rng.normal(0, 0.005, SHAPE) for a in (0.0, turn))
+    f0[5:20, 90:120] += 0.5
+    f1[5:20, 90:120] += 0.5
+    return f0, f1
+
+
+@pytest.mark.parametrize("turn", [0.3, -0.3])
+def test_hub_from_stills_needs_no_guess(turn):
+    f0, f1 = stills(turn)
+    hub, sign, _ = real.hub_from_stills(f0, f1, abs(turn))
+    assert np.hypot(hub[0] - HUB[0], hub[1] - HUB[1]) < 0.3 and sign == np.sign(turn)
+    r0, r1 = real.radii_from_stills(f0, f1, hub)
+    assert r0 <= R0 and R1 <= r1 <= R1 + 8
+
+
+def test_find_arc_covers_the_blade_and_its_smear():
+    img, _ = simulate()
+    a0, a1 = np.radians(real.find_arc(img, HUB, np.arange(R0 - 3.0, R1 + 4.0)))
+    lo, hi = START - HALF, START + HALF + OMEGA * T_EXP
+    assert a0 < lo and hi < a1 and (a1 - a0) - (hi - lo) < np.radians(30)
+
+
+def test_quick_calibration_end_to_end(tmp_path):
+    """the command line, as on the rig: calibrate.py auto from two stills, then deblur a capture whose arc
+    is found in it. Simulated images as .npy, the run log as the capture GUI writes it"""
+    here = Path(__file__).parents[1]
+    run = lambda *a: subprocess.run([sys.executable, *map(str, a)], cwd=here, check=True, capture_output=True, text=True)
+    f0, f1 = stills(0.3)
+    np.save(tmp_path / "still0.npy", f0)
+    np.save(tmp_path / "still1.npy", f1)
+    img, truth = simulate()
+    np.save(tmp_path / "cap.npy", img + np.random.default_rng(1).normal(0, 0.002, SHAPE))
+    (tmp_path / "cap.json").write_text(json.dumps(dict(
+        code=dict(bits=[int(c) for c in CODE], bit_duration_s=CHIP), actual_exposure_us=T_EXP * 1e6, readout_s=0.0,
+        frame_boundary_monotonic_ns=0, t0_monotonic_ns=0, late_bits=0, aborted=False)))
+    calib = tmp_path / "gs.json"
+    out = run("calibrate.py", "auto", calib, tmp_path / "still0.npy", tmp_path / "still1.npy", "--deg",
+              np.degrees(0.3), "--out", tmp_path).stdout
+    assert "counter-clockwise" in out and (tmp_path / "still1_auto.png").exists()
+    run("global-shutter.py", tmp_path / "cap.npy", "--calib", calib, "--rpm", OMEGA * 60 / (2 * np.pi),
+        "--solver", "tikhonov", "--lam", 1e-3, "--out", tmp_path)
+    x = np.load(tmp_path / "cap_global.npy")
+    assert blade_psnr(x, truth) > blade_psnr(img, truth) + 10

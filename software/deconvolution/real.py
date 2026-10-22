@@ -3,13 +3,16 @@ import json
 
 import numpy as np
 import rawpy
+from scipy.ndimage import binary_dilation, map_coordinates, uniform_filter1d
 from scipy.optimize import minimize
 from scipy.signal import savgol_filter
+from skimage.transform import downscale_local_mean
 
 import flutter as F
 
-# real captures: raw loading, hub from two stepped stills, monitor light from a blade edge and a bit check,
-# rolling shutter readout from a still scene, and turning the reference still to the deblurred blade
+# real captures: raw loading, hub and blade radii from two stepped stills, the arc of each capture, monitor
+# light from a blade edge and a bit check, rolling shutter readout from a still scene, and turning the
+# reference still to the deblurred blade
 
 
 def files(patterns):
@@ -26,7 +29,10 @@ def files(patterns):
 def load_dng(path):
     """linear image in [0, 1] of white: per-channel black level off, first green sublattice for a colour
     sensor (half size, so a rolling shutter line here is two sensor lines), whole frame for a mono one.
-    Keep it in raw sensor orientation: the rolling shutter timing follows sensor lines"""
+    Keep it in raw sensor orientation: the rolling shutter timing follows sensor lines. A .npy is taken as
+    already linear (simulated captures, tests)"""
+    if str(path).endswith(".npy"):
+        return np.load(path).astype(np.float64)
     with rawpy.imread(str(path)) as raw:
         bayer = raw.raw_image_visible.astype(np.float64)
         colours = np.asarray(raw.raw_colors_visible)
@@ -41,12 +47,29 @@ def load_dng(path):
 
 
 def run_log(path):
-    """(code, chip, t_exp) from the JSON that software/illumination/coded_illumination.py writes next to
-    each DNG. chip is total_duration_s / bits there, not one refresh: pass it to F.light(..., chip=chip)"""
+    """(code, chip, t_exp) from the json run log saved next to each DNG, by either capture tool:
+    software/data_capture (the camview GUI's Coded Capture) or software/illumination/coded_illumination.py.
+    chip is total_duration_s / bits, not one refresh: pass it to F.light(..., chip=chip)"""
     with open(path) as f:
         d = json.load(f)
-    code = "".join(map(str, d["sequence_played"]))
-    return code, d["params"]["bit_duration_s"], d["actual_exposure_us"] / 1e6
+    if "code" in d:                                              # data_capture GUI
+        bits, chip = d["code"]["bits"], d["code"]["bit_duration_s"]
+    else:                                                        # coded_illumination.py
+        bits, chip = d["sequence_played"], d["params"]["bit_duration_s"]
+    return "".join(map(str, bits)), chip, d["actual_exposure_us"] / 1e6
+
+
+def log_timing(path):
+    """what the data_capture GUI also logs, {} for coded_illumination.py logs: readout_s (first to last
+    line, 1 / max fps of the sensor mode), t0 (when the code starts after the first line opens: the camera
+    has been exposing one readout when the frame boundary arrives, then the display is told GO),
+    late_bits and aborted"""
+    with open(path) as f:
+        d = json.load(f)
+    if "code" not in d:
+        return {}
+    t0 = d["readout_s"] + (d["t0_monotonic_ns"] - d["frame_boundary_monotonic_ns"]) / 1e9
+    return dict(readout_s=d["readout_s"], t0=t0, late_bits=d.get("late_bits", 0), aborted=d.get("aborted", False))
 
 
 def mean_frames(paths):
@@ -178,3 +201,89 @@ def align(ref, x, hub, r, th):
     shift = (s + (0.5 * (a - c) / d if d < 0 else 0.0)) * dth
     turned = F.cartesian(F.polar(ref, hub, r, th + shift)[0], hub, r, th, x.shape)
     return turned, (shift + np.pi) % (2 * np.pi) - np.pi
+
+
+def turned_at(img, centre, angle, rows, cols):
+    """img turned counter-clockwise (as displayed) by angle radians about centre (row, col), read at the
+    pixels rows, cols: the value each pixel gets from where it came from"""
+    y, x = centre[0] - rows, cols - centre[1]                      # up, right
+    c, s = np.cos(angle), np.sin(angle)
+    return map_coordinates(img, [centre[0] - (c * y - s * x), centre[1] + (c * x + s * y)], order=1, mode="nearest")
+
+
+def moved(f0, f1):
+    """pixels that changed between two stills (the blade at either angle), 2 px margin. The static
+    background is left out, so it cannot pull a fit of the turn"""
+    d = np.abs(f1 - f0)
+    return binary_dilation(d > 0.25 * np.percentile(d, 99.9), iterations=2)
+
+
+def hub_from_stills(f0, f1, angle):
+    """(hub (row, col), turn sign, rms): the centre about which still f0, turned by |angle| radians,
+    best matches still f1, with no guess. sign +1 = the fan turned counter-clockwise as displayed.
+    A grid over the frame and half a frame around it (the hub may be out of view) on images shrunk to
+    about 200 px, at 400 of the pixels that changed, then Nelder-Mead at full size on up to 50,000.
+    Only pixels that changed count"""
+    m = moved(f0, f1)
+    if m.sum() < 50:
+        raise ValueError("the two stills are the same: turn the fan between them")
+    k = max(1, round(max(f0.shape) / 200))
+    g0, g1 = downscale_local_mean(f0, (k, k)), downscale_local_mean(f1, (k, k))
+    gm = downscale_local_mean(m.astype(float), (k, k)) > 0
+    rows, cols = np.nonzero(gm)
+    pick = np.random.default_rng(0).permutation(len(rows))[:400]       # plenty to find the hub roughly
+    rows, cols = rows[pick], cols[pick]
+    cr, cc = np.meshgrid(np.arange(-0.5 * g0.shape[0], 1.5 * g0.shape[0], 2.0),
+                         np.arange(-0.5 * g0.shape[1], 1.5 * g0.shape[1], 2.0), indexing="ij")
+    cr, cc = cr.ravel()[:, None], cc.ravel()[:, None]
+    n = max(1, 4_000_000 // len(rows))                            # centres per batch
+    best = (np.inf,)
+    for sign in (1, -1):
+        for i in range(0, len(cr), n):
+            e = np.mean((g1[rows, cols] - turned_at(g0, (cr[i:i + n], cc[i:i + n]), sign * angle, rows, cols)) ** 2, 1)
+            j = int(np.argmin(e))
+            if e[j] < best[0]:
+                best = (e[j], sign, (cr[i + j, 0] + 0.5) * k - 0.5, (cc[i + j, 0] + 0.5) * k - 0.5)   # full-size px
+    _, sign, cr, cc = best
+    rows, cols = np.nonzero(m)
+    pick = np.random.default_rng(0).permutation(len(rows))[:50_000]
+    rows, cols = rows[pick], cols[pick]
+    cost = lambda c: np.mean((f1[rows, cols] - turned_at(f0, c, sign * angle, rows, cols)) ** 2)
+    res = minimize(cost, [cr, cc], method="Nelder-Mead",
+                   options=dict(xatol=0.02, fatol=1e-14, initial_simplex=[[cr, cc], [cr + 2 * k, cc], [cr, cc + 2 * k]]))
+    return tuple(res.x), sign, float(np.sqrt(res.fun))
+
+
+def radii_from_stills(f0, f1, hub):
+    """(r0, r1) px: the rings the blade covers, from the pixels that changed between the stills, 3 px margin"""
+    rows, cols = np.nonzero(moved(f0, f1))
+    rr = np.hypot(rows - hub[0], cols - hub[1])
+    return max(2.0, float(np.floor(np.percentile(rr, 1))) - 3), float(np.ceil(np.percentile(rr, 99.5))) + 3
+
+
+def find_arc(img, hub, r):
+    """(a0, a1) deg, counter-clockwise from +col: the arc to deblur in one capture, the brightest blade
+    and its smear. The capture's brightness around the hub over rings r: blades and their smears are
+    bright, the gaps between them dark. Widened by a tenth (at least 3 deg) each side for the faint ends
+    of the smear, where only one bit of the code lit the blade"""
+    th = np.arange(-np.pi, np.pi, 1 / r[-1])
+    P, rows, cols = F.polar(img, hub, r, th)
+    inside = (rows >= 0) & (rows <= img.shape[0] - 1) & (cols >= 0) & (cols <= img.shape[1] - 1)
+    prof = (P * inside).sum(0) / np.maximum(inside.sum(0), 1)
+    prof = uniform_filter1d(prof, max(1, int(np.radians(2) * r[-1])), mode="wrap")
+    bg, top = np.percentile(prof, 10), np.percentile(prof, 99)
+    on = prof > bg + 0.05 * (top - bg)
+    if on.all() or not on.any():
+        raise ValueError("no dark gap between blades: set the arc by hand (calibrate.py init --arc)")
+    shift = int(np.argmin(on))                                     # start the circle in a gap
+    on, prof = np.roll(on, -shift), np.roll(prof, -shift) - bg
+    edges = np.flatnonzero(np.diff(np.r_[0, on.astype(int), 0]))
+    starts, ends = edges[::2], edges[1::2]
+    i = int(np.argmax([prof[a:b].sum() for a, b in zip(starts, ends)]))
+    dth = th[1] - th[0]
+    a0, a1 = th[0] + (starts[i] + shift) * dth, th[0] + (ends[i] + shift) * dth
+    pad = max(np.radians(3), 0.1 * (a1 - a0))
+    a0, a1 = a0 - pad, a1 + pad
+    if a1 - a0 > 2 * np.pi - np.radians(5):
+        raise ValueError("the blade and its smear cover the whole circle: set the arc by hand")
+    return float(np.degrees(a0)), float(np.degrees(a1))

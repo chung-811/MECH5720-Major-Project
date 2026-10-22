@@ -17,7 +17,7 @@ Then, in this folder:
 
 ```
 uv sync          # about 1 GB of packages (PyTorch, CPU only), about 2 minutes the first time
-uv run pytest    # 23 checks, about a minute; the first run downloads the 131 MB DRUNet weights
+uv run pytest    # 29 checks, about a minute; the first run downloads the 131 MB DRUNet weights
 ```
 
 If the tests pass, the pipeline works on your machine. Optional extras: Blender 5.2 for new renders,
@@ -25,58 +25,64 @@ and [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html) for t
 
 ## Real captures
 
-Every capture is a DNG plus the json run log `software/illumination/coded_illumination.py` saves next to
-it. The log gives the code, the bit length and the exposure, so nothing about the code is typed in.
-Work in raw sensor orientation (do not rotate the images): the rolling shutter timing follows sensor
-lines. On a colour sensor, coordinates are in the half-size green image `real.load_dng` returns.
+Capture with the camview GUI's Coded Capture (`software/data_capture`). Each capture is a DNG plus a
+json run log next to it, which gives the code, bit length, exposure, readout and timing, so nothing
+about the code is typed in. Logs from `software/illumination/coded_illumination.py` also work. Keep
+the images in raw sensor orientation (do not rotate them). On a colour sensor, coordinates are in the
+half-size green image `real.load_dng` returns: `calibrate.py grid` shows them.
 
-One calibration json per camera, made once per setup:
+### What to capture, per camera (same gain throughout, nothing moved between shots)
 
-```
-# 1. first guess, read off a capture: hub (row col), radii and the arc (deg, counter-clockwise from
-#    +col) covering the blade and its smear
-uv run python calibrate.py init gs.json --hub 480 640 --radius 150 450 --arc 200 300
-uv run python calibrate.py init rs.json --hub 480 640 --radius 150 450 --arc 200 300
+| Shot | Used for |
+| --- | --- |
+| coded captures of the spinning fan, commanded rpm noted | the result |
+| two stills of the stopped fan, turned a known number of stepper steps apart (100 or more) | `calibrate.py auto`: hub, blade radii, turn direction |
+| about 10 coded captures of a blade with nothing printed near its leading edge, each started from the same blade angle (global shutter) | monitor (optional) |
+| a still of the stopped fan in constant light | `--reference` (criterion 1 scoring) |
 
-# 2. check it: draws the hub and arc on a capture, out/<name>_global_check.png
-uv run python global-shutter.py cap.dng --calib gs.json --rpm 2.8 --check
+Set `total_duration_s` in the code file to a whole number of refreshes per bit (16 bits at 4
+refreshes of a 60 Hz monitor = 1.0667 s): the screen only changes on a refresh.
 
-# 3. hub: two stills of the stopped blade, turned by a known angle between them (100 steps or more)
-uv run python calibrate.py hub gs.json still0.dng still1.dng --deg 17.7
+### Steps
 
-# 4. monitor: 10 coded captures of a plain blade (global shutter camera), into both calibrations.
-#    Also checks every bit showed as coded: one refresh per bit can double or skip one
-uv run python calibrate.py monitor plain*.dng --calib gs.json rs.json --rpm 2.8 --dark dark*.dng
-
-# 5. rolling shutter only: readout time and when the code starts, from the fan stopped, once under
-#    the code and once under constant light (params_constant52.json), same params as the real captures
-uv run python calibrate.py readout rs.json still_coded.dng still_constant.dng --dark dark*.dng
-```
-
-Then deblur. Each script writes `out/<name>_<method>.png` (capture beside result) and `.npy` (the
-deblurred image, same units as a still capture):
+The only values you type are the stepper turn between the two hub stills and the fan speed.
 
 ```
-uv run python global-shutter.py            cap*.dng --calib gs.json --rpm 2.8 --dark dark*.dng
-uv run python rolling-shutter-per-frame.py cap*.dng --calib rs.json --rpm 2.8 --dark dark*.dng
-uv run python rolling-shutter-per-row.py   cap*.dng --calib rs.json --rpm 2.8 --dark dark*.dng
+# 1. calibration from two stills of the stopped fan, stepped apart (28BYJ-48: about 2038 full steps
+#    per rev). Finds the hub, the blade radii and which way the fan turns, no guess needed.
+#    Check out/<still1>_auto.png: the + on the axle, the blade between the two circles
+uv run python calibrate.py auto gs.json gs_still0.dng gs_still1.dng --steps 200 --steps-per-rev 2038
+uv run python calibrate.py auto rs.json rs_still0.dng rs_still1.dng --steps 200 --steps-per-rev 2038
+
+# 2. monitor (optional, better results): black level, LCD lag and a check every bit showed as coded,
+#    from coded captures of a plain blade, all started from the same blade angle (or just one)
+uv run python calibrate.py monitor plain*.dng --calib gs.json rs.json --rpm 5
+
+# 3. deblur. --rpm is the commanded speed, signed as step 1 printed. Writes out/<name>_<method>.png
+#    (capture beside result, with the arc it deblurred) and .npy (the deblurred image)
+uv run python global-shutter.py            cap*.dng --calib gs.json --rpm 5 --reference still_gs.dng
+uv run python rolling-shutter-per-frame.py cap*.dng --calib rs.json --rpm 5 --reference still_rs.dng
+uv run python rolling-shutter-per-row.py   cap*.dng --calib rs.json --rpm 5 --reference still_rs.dng
 ```
 
-`--rpm` is the commanded speed, + for counter-clockwise as the raw image is displayed. `--find-speed`
-also estimates the speed blind (criterion 3) and deblurs at the estimate. `--reference still.dng` (the
-stopped blade) turns the still to where the deblurred blade is and reports PSNR, SSIM and PSNR by band
-of sensor lines (criterion 1), with mean and std over all the captures given. `--solver tikhonov` is
-the fast baseline. `-h` on any script lists its options.
+The arc to deblur is found in each capture (the brightest blade and its smear, between the dark gaps),
+as the blade stops at a different angle every time. `--check` draws it on each capture without
+deblurring. If `auto` fits badly it says so; then set things by hand: `calibrate.py grid cap.dng`
+saves the capture with a pixel grid, read the hub (row, col), radii and arc off it, and
+`calibrate.py init gs.json --hub ROW COL --radius R0 R1 --arc A0 A1` (degrees counter-clockwise from
++col; `--arc` fixes the arc for every capture). `calibrate.py hub` then refines the hub.
 
-Exposure padding (`exposure_padding_s` in the illumination params): coded_illumination.py starts the
-code about 20 ms after the exposure opens, so with no padding the end of the code falls outside it.
-Global shutter: pad 0.05 s so the whole code is inside. Rolling shutter: padding decides the
-experiment. With none, every line catches a different part of the code, which is what per-row
-deconvolution is for (step 5 measures the timing it needs); padded past code + readout, every line
-catches all of it and per-row and per-frame become the same.
+`--reference` turns the still to where the deblurred blade is and reports PSNR, SSIM and PSNR by band
+of sensor lines (criterion 1), with mean and std over all captures given. `--find-speed` estimates the
+speed blind (criterion 3, within 20% of `--rpm`) and deblurs at the estimate. `--dark dark*.dng`
+subtracts dark frames (same exposure and gain, monitor black). `--solver tikhonov` is the fast
+baseline. `-h` on any script lists its options.
 
-Set the monitor's `total_duration_s` to a whole number of refreshes per bit (16 bits at 4 refreshes
-= 1.0667 s): the screen only changes on a refresh, so other lengths come out uneven.
+Rolling shutter timing: the GUI pads the exposure by the readout, so every sensor line sees the whole
+code, the deblur takes the readout from the run log, and per-row and per-frame give near enough the same result.
+To make per-row matter, capture with less padding and measure the timing first, from the stopped fan
+under the code and under constant light:
+`uv run python calibrate.py readout rs.json still_coded.dng still_constant.dng`.
 
 ## Simulation (Blender)
 
@@ -121,9 +127,9 @@ Every study takes `--chip` (seconds per code bit, default 1/60).
 | --- | --- |
 | `global-shutter.py`, `rolling-shutter-per-frame.py`, `rolling-shutter-per-row.py` | deblur real captures by each method |
 | `capture.py` | what those three run: grid from the calibration, monitor model, deblur, figures |
-| `calibrate.py` | per-camera calibration json: first guess, hub, monitor (with a bit check), rolling shutter readout |
+| `calibrate.py` | per-camera calibration json: auto from two stills, or by hand (grid, init, hub); monitor (with a bit check); rolling shutter readout |
 | `flutter.py` | the model: monitor code, line exposure weights, sensor noise, unwrap about the hub, forward model, Tikhonov, DPIR, blind speed |
-| `real.py` | DNG loading, run log, hub from two stills, monitor waveform from a blade edge |
+| `real.py` | DNG loading, run log (both capture tools), hub and radii from two stills, arc of each capture, monitor waveform from a blade edge |
 | `blender/render_fan.py` | blade as sharp linear frames at t = (k + 0.5) dt, plus the t = 0 reference |
 | `demo.py` | all three methods plus constant light and a short exposure, speed estimate |
 | `rows.py` | criterion 1: GS vs RS per-frame vs RS per-row by band of sensor lines, three codes, three readouts |
