@@ -15,6 +15,8 @@ import real
 # rolling-shutter-per-row.py, which differ only in which exposure window each sample is given:
 # global: every line the same; rs-frame: every line the middle line's; rs-row: every line its own
 METHODS = ("global", "rs-frame", "rs-row")
+SIGN_MARGIN = 0.9   # switch direction only when the other sign's residual is under 0.9 x: in simulation the wrong
+                    # sign's was 1.2 to 2.7 x the right one's (full and 0.1 x light, uneven light, 5 and 10 rpm)
 
 
 def for_capture(calib, img):
@@ -65,9 +67,21 @@ def deblur(img, calib, code, chip, t_exp, rpm, method, solver="dpir", lam=1e-2, 
     kw = dict(t_line=readout / scene.n_lines, per_row=method == "rs-row", ref_line=scene.n_lines // 2)
     print(f"  {len(scene.r)} rings x {len(scene.th)} arc samples, {len(scene.t)} sub-frames of {scene.dt * 1e3:.2f} ms")
     P, lines = F.unwrap(scene, img)
+    right, wrong = F.residuals(scene, P, lines, L, t_exp, [scene.omega, -scene.omega], **kw)
+    if wrong < SIGN_MARGIN * right:              # the other direction explains the capture clearly better
+        print(f"  *** the fan turns the other way to --rpm: {-rpm:+g} rpm fits {right / wrong:.1f}x better, deblurring "
+              f"at that. Check --rpm's sign (calibrate.py auto prints it)")
+        scene.omega, rpm = -scene.omega, -rpm
+    elif wrong < right:
+        print(f"  warning: cannot tell which way the fan turns from this capture (the two fit within "
+              f"{100 * (1 - SIGN_MARGIN):.0f}%), keeping --rpm's sign")
     if find_speed:
-        est = F.speed(scene, P, lines, L, t_exp, scene.omega * np.linspace(0.8, 1.2, 21), **kw)[0]
+        grid = scene.omega * np.linspace(0.8, 1.2, 21)
+        est, scores = F.speed(scene, P, lines, L, t_exp, grid, **kw)
         print(f"  blind speed {est * 60 / (2 * np.pi):.3f} rpm (commanded {rpm:.3f})")
+        if np.argmin(scores) in (0, len(grid) - 1):
+            print(f"  *** the blind speed is at the edge of its search ({0.8 * rpm:.3f} to {1.2 * rpm:.3f} rpm), so the "
+                  f"true speed is outside it and this estimate is wrong: rerun with --rpm nearer the true speed")
         scene.omega = est
     if solver == "dpir":
         x = F.dpir(*F.forward_model(scene, L, t_exp, lines, **kw), P)
@@ -128,7 +142,7 @@ def main(method):
     dark = real.mean_frames(real.files(args.dark)) if args.dark else 0.0
     ref = real.load_dng(args.reference) - dark if args.reference else None
     out = Path(args.out)
-    out.mkdir(exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
     scores, band_scores, speeds = [], [], []
     for path in map(Path, real.files(args.dng)):
         img = real.load_dng(path) - dark

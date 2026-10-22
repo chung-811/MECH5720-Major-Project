@@ -17,7 +17,7 @@ Then, in this folder:
 
 ```
 uv sync          # about 1 GB of packages (PyTorch, CPU only), about 2 minutes the first time
-uv run pytest    # 29 checks, about a minute; the first run downloads the 131 MB DRUNet weights
+uv run pytest    # 35 checks, about a minute; the first run downloads the 131 MB DRUNet weights
 ```
 
 If the tests pass, the pipeline works on your machine. Optional extras: Blender 5.2 for new renders,
@@ -31,14 +31,21 @@ about the code is typed in. Logs from `software/illumination/coded_illumination.
 the images in raw sensor orientation (do not rotate them). On a colour sensor, coordinates are in the
 half-size green image `real.load_dng` returns: `calibrate.py grid` shows them.
 
+### The rig
+
+Nothing bright may sit behind the blades: the deblur assumes everything in the blade's arc turns with
+it, and a white stand behind the blades took a simulated deblur from 33 dB to 9 dB. Cover the front of
+the stand in matte black (card or gaffer tape) as well as the backdrop. Put the text on a flat paddle
+on each blade, different letters on each, at least 5 to 8 mm tall.
+
 ### What to capture, per camera (same gain throughout, nothing moved between shots)
 
 | Shot | Used for |
 | --- | --- |
 | coded captures of the spinning fan, commanded rpm noted | the result |
-| two stills of the stopped fan, turned a known number of stepper steps apart (100 or more) | `calibrate.py auto`: hub, blade radii, turn direction |
+| three stills of the stopped fan, each 200 steps on from the last (not 680: 120 deg looks the same on a 3-blade fan) | `calibrate.py auto`: hub, blade radii, turn direction, and a check nothing moved |
 | about 10 coded captures of a blade with nothing printed near its leading edge, each started from the same blade angle (global shutter) | monitor (optional) |
-| a still of the stopped fan in constant light | `--reference` (criterion 1 scoring) |
+| a still of the stopped fan in constant light, in the same setup as the captures | `--reference` (criterion 1 scoring) |
 
 Set `total_duration_s` in the code file to a whole number of refreshes per bit (16 bits at 4
 refreshes of a 60 Hz monitor = 1.0667 s): the screen only changes on a refresh.
@@ -48,14 +55,17 @@ refreshes of a 60 Hz monitor = 1.0667 s): the screen only changes on a refresh.
 The only values you type are the stepper turn between the two hub stills and the fan speed.
 
 ```
-# 1. calibration from two stills of the stopped fan, stepped apart (28BYJ-48: about 2038 full steps
-#    per rev). Finds the hub, the blade radii and which way the fan turns, no guess needed.
+# 1. calibration from three stills of the stopped fan, each 200 steps on (28BYJ-48: about 2038 full
+#    steps per rev). Finds the hub, the blade radii and which way the fan turns, no guess needed, and
+#    warns if the pairs of stills disagree (something moved: retake them). Two stills also work, unchecked.
 #    Check out/<still1>_auto.png: the + on the axle, the blade between the two circles
-uv run python calibrate.py auto gs.json gs_still0.dng gs_still1.dng --steps 200 --steps-per-rev 2038
-uv run python calibrate.py auto rs.json rs_still0.dng rs_still1.dng --steps 200 --steps-per-rev 2038
+uv run python calibrate.py auto gs.json gs_still0.dng gs_still1.dng gs_still2.dng --steps 200 --steps-per-rev 2038
+uv run python calibrate.py auto rs.json rs_still0.dng rs_still1.dng rs_still2.dng --steps 200 --steps-per-rev 2038
 
-# 2. monitor (optional, better results): black level, LCD lag and a check every bit showed as coded,
-#    from coded captures of a plain blade, all started from the same blade angle (or just one)
+# 2. monitor (optional): black level, LCD lag and a check every bit showed as coded, from coded
+#    captures of a plain blade wider than its smear, all started from the same blade angle (or just
+#    one). Thin rods smear wider than themselves, so on them it refuses to save: skip it, the deblur
+#    does without (in simulation, an unmodelled 2% black level and 4 ms lag left 33 dB)
 uv run python calibrate.py monitor plain*.dng --calib gs.json rs.json --rpm 5
 
 # 3. deblur. --rpm is the commanded speed, signed as step 1 printed. Writes out/<name>_<method>.png
@@ -74,7 +84,11 @@ saves the capture with a pixel grid, read the hub (row, col), radii and arc off 
 
 `--reference` turns the still to where the deblurred blade is and reports PSNR, SSIM and PSNR by band
 of sensor lines (criterion 1), with mean and std over all captures given. `--find-speed` estimates the
-speed blind (criterion 3, within 20% of `--rpm`) and deblurs at the estimate. `--dark dark*.dng`
+speed blind (criterion 3) and deblurs at the estimate. It refines a speed already known to within 20%
+(the commanded rpm): it searches 0.8 to 1.2 x `--rpm`, and says so if the best is at the edge. Further off
+it can settle on a false dip (slow speeds explain a capture almost as well), so check `--rpm` first.
+Every deblur also checks which way the fan turns: if the other sign of `--rpm` fits clearly better, it
+deblurs at that and says so. `--dark dark*.dng`
 subtracts dark frames (same exposure and gain, monitor black). `--solver tikhonov` is the fast
 baseline. `-h` on any script lists its options.
 

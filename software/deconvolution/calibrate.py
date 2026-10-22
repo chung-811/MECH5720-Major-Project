@@ -45,28 +45,51 @@ def arc_rad(c, r, img):
 
 
 def auto(a):
-    """the whole calibration from two stills of the stopped fan, no guess: hub, blade rings and which way
-    the fan turned. The arc is left "auto", found in each capture. Draws what it found, to check"""
+    """the whole calibration from stills of the stopped fan, each the same number of steps on from the
+    last, no guess: hub, blade rings and which way the fan turned. The arc is left "auto", found in each
+    capture. With 3 or more stills the hub is fitted from every pair and the median kept: if the camera
+    or fan moved between stills, pairs turned by different angles disagree, and it says so (2 stills
+    cannot show it). Draws what it found, to check"""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    f0, f1 = real.load_dng(a.still0), real.load_dng(a.still1)
+    if len(a.stills) < 2:
+        raise SystemExit("give two or more stills")
+    frames = [real.load_dng(f) for f in a.stills]
+    turn = np.radians(abs(turn_deg(a)))
+    fits = []
     try:
-        (hr, hc), sign, rms = real.hub_from_stills(f0, f1, np.radians(abs(turn_deg(a))))
+        for i in range(len(frames)):
+            for j in range(i + 1, len(frames)):
+                fits.append((i, j, *real.hub_from_stills(frames[i], frames[j], (j - i) * turn)))
     except ValueError as err:
         raise SystemExit(str(err))
+    hubs = np.array([f[2] for f in fits])
+    hr, hc = np.median(hubs, 0)
+    f0, f1 = frames[0], frames[1]
+    sign, rms = fits[0][3], fits[0][4]
     r0, r1 = real.radii_from_stills(f0, f1, (hr, hc))
     m = real.moved(f0, f1)
     unexplained = rms / np.sqrt(np.mean((f1 - f0)[m] ** 2))
+    if len(frames) > 2:
+        spread = np.hypot(*(hubs - [hr, hc]).T)
+        print("hub from each pair of stills: " + ", ".join(f"{i}-{j} ({h[0]:.1f}, {h[1]:.1f})" for i, j, h, *_ in fits))
+        if spread.max() > 1.0 or len({f[3] for f in fits}) > 1:
+            print(f"*** the pairs disagree by up to {spread.max():.1f} px: the camera or fan moved between stills, or the "
+                  f"steps between them were not all {a.steps if a.steps is not None else a.deg}. Retake them")
     print(f"hub (row, col) ({hr:.2f}, {hc:.2f}), blade {r0:.0f} to {r1:.0f} px from it. From still0 to still1 the fan "
           f"turned {'counter-clockwise' if sign > 0 else 'clockwise'} as displayed: if that is the stepper's forward "
           f"direction, --rpm is {'+' if sign > 0 else '-'}. {100 * unexplained:.0f}% of the change between the stills "
           f"is left unexplained")
     if unexplained > 0.5:
         print("*** that is a poor fit: check the stills are of the same setup and the turn (--steps, --steps-per-rev)")
-    save(a.calib, dict(hub=[round(hr, 2), round(hc, 2)], radius_px=[r0, r1], arc_deg="auto", readout_s=a.readout,
-                       readout_axis=a.axis, monitor=dict(black=0.0, tau=0.0, t0=0.0)))
-    Path(a.out).mkdir(exist_ok=True)
+    old = load(a.calib) if Path(a.calib).exists() else {}
+    if old.get("monitor", {}).get("tau") or old.get("readout_s"):
+        print(f"kept the monitor and readout values already in {a.calib}")
+    save(a.calib, dict(hub=[round(hr, 2), round(hc, 2)], radius_px=[r0, r1], arc_deg="auto",
+                       readout_s=old.get("readout_s", 0.0) if a.readout is None else a.readout, readout_axis=a.axis,
+                       monitor=old.get("monitor", dict(black=0.0, tau=0.0, t0=0.0))))
+    Path(a.out).mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(10, 10 * f1.shape[0] / f1.shape[1]))
     ax.imshow(f1, cmap="gray", vmin=0, vmax=max(np.percentile(f1, 99.5), 1e-6))
     tt = np.linspace(0, 2 * np.pi, 400)
@@ -75,7 +98,7 @@ def auto(a):
     ax.plot(hc, hr, "r+", ms=14)
     ax.set_xlim(0, f1.shape[1]), ax.set_ylim(f1.shape[0], 0)
     ax.set_title("hub (+) and the rings to deblur: the blade should sit between the circles, the + on its axle")
-    out = Path(a.out) / f"{Path(a.still1).stem}_auto.png"
+    out = Path(a.out) / f"{Path(a.stills[1]).stem}_auto.png"
     fig.savefig(out, dpi=100, bbox_inches="tight")
     print(f"check it: {out}")
 
@@ -85,7 +108,7 @@ def grid(a):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    Path(a.out).mkdir(exist_ok=True)
+    Path(a.out).mkdir(parents=True, exist_ok=True)
     for path in map(Path, real.files(a.dng)):
         img = real.load_dng(path)
         step = 50 if max(img.shape) > 800 else 25
@@ -119,6 +142,9 @@ def hub(a):
     save(a.calib, c)
 
 
+TAU_MAX, BLACK_MAX = 0.0099, 0.2    # fit_monitor searches lag to 10 ms; an LCD's black is a few % of white at most
+
+
 def monitor(a):
     """black level, LCD lag and timing of the monitor from the leading edge of a plain blade"""
     c = load(a.calib[0])
@@ -126,7 +152,10 @@ def monitor(a):
     img = real.mean_frames(dng) - (real.mean_frames(real.files(a.dark)) if a.dark else 0.0)
     code, chip, t_exp = real.run_log(Path(dng[0]).with_suffix(".json"))
     r = np.arange(c["radius_px"][0], c["radius_px"][1] + 1.0)
-    th = arc_rad(c, r, img)
+    try:
+        th = arc_rad(c, r, img)
+    except ValueError as err:
+        raise SystemExit(str(err))
     dt = chip / 16
     t = (np.arange(int(np.ceil(t_exp / dt))) + 0.5) * dt
     L = real.kernel_from_edge(img, c["hub"], r, th, a.rpm * 2 * np.pi / 60, t)
@@ -134,10 +163,17 @@ def monitor(a):
     print(f"black level {black:.3f}, LCD lag {tau * 1e3:.2f} ms")
     bad = real.check_bits(L, t, code, chip, black, t0)
     if bad:
-        print(f"*** bits {bad} of {len(code)} did not show as coded (a refresh doubled or skipped one), or the arc "
-              f"stops short of the end of the smear. Fix that before deblurring anything")
+        print(f"*** bits {bad} of {len(code)} did not show as coded: a refresh doubled or skipped one, the arc stops "
+              f"short of the end of the smear, or the blade is narrower than its smear (its two edges' smears overlap, "
+              f"which this step cannot read: thin rods need a wide plain paddle, or skip this step)")
     else:
         print(f"all {len(code)} bits showed as coded")
+    implausible = tau >= TAU_MAX or black >= BLACK_MAX
+    if implausible:
+        print(f"*** {'the lag is at the end of its search' if tau >= TAU_MAX else 'a black level that high is not a monitor'}"
+              f": the fit is not measuring the monitor")
+    if bad or implausible:
+        raise SystemExit("not saved: the calibration keeps its monitor values (the deblur works without this step)")
     for path in a.calib:
         c = load(path)
         c["monitor"] = dict(black=round(black, 4), tau=float(tau), t0=float(t0))
@@ -171,15 +207,16 @@ ap = argparse.ArgumentParser(description="write and fill one calibration json pe
                              "monitor. By hand: grid, init, check it with --check on a capture, hub, monitor. "
                              "readout only for rolling shutter captures not padded past the readout")
 sub = ap.add_subparsers(required=True)
-p = sub.add_parser("auto", help="whole calibration from two stills of the stopped fan, turned between them")
+p = sub.add_parser("auto", help="whole calibration from stills of the stopped fan, turned between them")
 p.add_argument("calib")
-p.add_argument("still0")
-p.add_argument("still1")
-p.add_argument("--steps", type=float, help="the turn in stepper steps (sign does not matter, it is found)")
+p.add_argument("stills", nargs="+", help="2 or more stills in order, each the same steps on from the last; 3 or more "
+               "also check nothing moved between them")
+p.add_argument("--steps", type=float, help="the turn between consecutive stills in stepper steps (sign is found)")
 p.add_argument("--steps-per-rev", type=float,
                help="with --steps: steps per revolution in the driver's step mode (28BYJ-48: about 2038 full steps)")
 p.add_argument("--deg", type=float, help="or the turn in degrees")
-p.add_argument("--readout", type=float, default=0.0, help="first to last line, s; 0 = global shutter or from the run log")
+p.add_argument("--readout", type=float, help="first to last line, s; left out: kept from an existing calibration, "
+               "else 0 (global shutter, or taken from the run log)")
 p.add_argument("--axis", type=int, default=0, choices=(0, 1), help="0 = sensor lines are image rows (raw)")
 p.add_argument("--out", default="out", help="folder for the check image")
 p.set_defaults(run=auto)

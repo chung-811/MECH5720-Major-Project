@@ -52,11 +52,14 @@ def run_log(path):
     chip is total_duration_s / bits, not one refresh: pass it to F.light(..., chip=chip)"""
     with open(path) as f:
         d = json.load(f)
-    if "code" in d:                                              # data_capture GUI
-        bits, chip = d["code"]["bits"], d["code"]["bit_duration_s"]
-    else:                                                        # coded_illumination.py
-        bits, chip = d["sequence_played"], d["params"]["bit_duration_s"]
-    return "".join(map(str, bits)), chip, d["actual_exposure_us"] / 1e6
+    try:
+        if "code" in d:                                          # data_capture GUI
+            bits, chip = d["code"]["bits"], d["code"]["bit_duration_s"]
+        else:                                                    # coded_illumination.py
+            bits, chip = d["sequence_played"], d["params"]["bit_duration_s"]
+        return "".join(map(str, bits)), chip, d["actual_exposure_us"] / 1e6
+    except (KeyError, TypeError) as err:
+        raise SystemExit(f"{path}: no {err} in it, so not a run log from the capture GUI or coded_illumination.py")
 
 
 def log_timing(path):
@@ -68,7 +71,10 @@ def log_timing(path):
         d = json.load(f)
     if "code" not in d:
         return {}
-    t0 = d["readout_s"] + (d["t0_monotonic_ns"] - d["frame_boundary_monotonic_ns"]) / 1e9
+    try:
+        t0 = d["readout_s"] + (d["t0_monotonic_ns"] - d["frame_boundary_monotonic_ns"]) / 1e9
+    except KeyError as err:
+        raise SystemExit(f"{path}: no {err} in it, so not a complete run log from the capture GUI")
     return dict(readout_s=d["readout_s"], t0=t0, late_bits=d.get("late_bits", 0), aborted=d.get("aborted", False))
 
 
@@ -186,12 +192,16 @@ def fit_readout(coded, constant, code, chip, t_exp, axis=0, black=0.0, tau=0.0):
 def align(ref, x, hub, r, th):
     """(reference turned to where the blade is in x, angle turned): a still of the stopped blade, rotated
     about the hub by the angle that best matches x over the rings r and angles th (circular
-    cross-correlation of every ring, summed). Puts the ground truth where the deblurred blade is"""
+    cross-correlation of every ring, summed). Puts the ground truth where the deblurred blade is.
+    Matched on the change along each ring, scaled to unit size per ring: edges and print, so uneven
+    light cannot pull it onto a brighter look-alike blade"""
     dth = th[1] - th[0]
     full = th[0] + np.arange(int(np.ceil(2 * np.pi / dth))) * dth
     Px, Pr = F.polar(x, hub, r, th)[0], F.polar(ref, hub, r, full)[0]
-    Px = Px - Px.mean(1, keepdims=True)
-    Pr = Pr - Pr.mean(1, keepdims=True)
+    Px = np.diff(Px, axis=1, append=Px[:, -1:])
+    Pr = np.diff(Pr, axis=1, append=Pr[:, :1])                   # the reference's ring is a full turn
+    Px = Px / (np.linalg.norm(Px, axis=1, keepdims=True) + 1e-12)
+    Pr = Pr / (np.linalg.norm(Pr, axis=1, keepdims=True) + 1e-12)
     pad = np.zeros_like(Pr)
     pad[:, :Px.shape[1]] = Px
     corr = np.fft.irfft(np.conj(np.fft.rfft(pad)) * np.fft.rfft(Pr), Pr.shape[1]).sum(0)
@@ -263,11 +273,13 @@ def radii_from_stills(f0, f1, hub):
 
 def find_arc(img, hub, r):
     """(a0, a1) deg, counter-clockwise from +col: the arc to deblur in one capture, the brightest blade
-    and its smear. The capture's brightness around the hub over rings r: blades and their smears are
+    and its smear. The capture's brightness around the hub over the outer half of rings r (nearer the
+    hub the blades run together, more so if the hub is a little off): blades and their smears are
     bright, the gaps between them dark. Widened by a tenth (at least 3 deg) each side for the faint ends
-    of the smear, where only one bit of the code lit the blade"""
+    of the smear, where only one bit of the code lit the blade. Refuses arcs over 180 deg: the deblur
+    needs the arc plus its smear to stay short of a full turn"""
     th = np.arange(-np.pi, np.pi, 1 / r[-1])
-    P, rows, cols = F.polar(img, hub, r, th)
+    P, rows, cols = F.polar(img, hub, r[r >= (r[0] + r[-1]) / 2], th)
     inside = (rows >= 0) & (rows <= img.shape[0] - 1) & (cols >= 0) & (cols <= img.shape[1] - 1)
     prof = (P * inside).sum(0) / np.maximum(inside.sum(0), 1)
     prof = uniform_filter1d(prof, max(1, int(np.radians(2) * r[-1])), mode="wrap")
@@ -284,6 +296,7 @@ def find_arc(img, hub, r):
     a0, a1 = th[0] + (starts[i] + shift) * dth, th[0] + (ends[i] + shift) * dth
     pad = max(np.radians(3), 0.1 * (a1 - a0))
     a0, a1 = a0 - pad, a1 + pad
-    if a1 - a0 > 2 * np.pi - np.radians(5):
-        raise ValueError("the blade and its smear cover the whole circle: set the arc by hand")
+    if a1 - a0 > np.pi:
+        raise ValueError(f"the brightest blade and its smear span {np.degrees(a1 - a0):.0f} deg, over 180: the "
+                         "blades run together (hub off, or too fast for the gaps), set the arc by hand")
     return float(np.degrees(a0)), float(np.degrees(a1))

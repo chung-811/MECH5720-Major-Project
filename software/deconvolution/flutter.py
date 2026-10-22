@@ -168,18 +168,25 @@ def dpir(A, m, P, sigma=None, full=False):
     return X.numpy()[0, 0] if full else X.numpy()[0, 0][:, m:m + n]
 
 
-def speed(scene, P, lines, L, t_exp, omegas, rings=64, **kw):
-    """blind speed: the omega whose DPIR deblur best explains the data, on a band of rings mid-blade,
-    refined by a parabola through the best grid point and its neighbours. A wrong speed predicts the
-    blur wrongly and the prior will not let DPIR fit it anyway. In simulation (3 speeds x 3 noise draws)
-    this was within 0.6%, where negative light after Tikhonov read 2.5% low. returns estimate, scores"""
-    band = slice(len(P) // 2 - rings // 2, len(P) // 2 + rings // 2)
-    scores = []
+def residuals(scene, P, lines, L, t_exp, omegas, rings=64, **kw):
+    """|A X - P| of the DPIR deblur at each speed, on a band of rings mid-blade: how well each speed
+    explains the data. A wrong speed (or direction) predicts the blur wrongly and the prior will not
+    let DPIR fit it anyway"""
+    band = slice(max(0, len(P) // 2 - rings // 2), len(P) // 2 + rings // 2)
+    out = []
     for om in omegas:
         A, m = forward_model(scene, L, t_exp, lines[band], omega=om, **kw)
         X = dpir(A, m, P[band], full=True)
-        scores.append(np.linalg.norm(A @ X.ravel() - P[band].ravel()))
-    scores = np.array(scores)
+        out.append(np.linalg.norm(A @ X.ravel() - P[band].ravel()))
+    return np.array(out)
+
+
+def speed(scene, P, lines, L, t_exp, omegas, rings=64, **kw):
+    """blind speed: the omega whose DPIR deblur best explains the data (residuals), refined by a
+    parabola through the best grid point and its neighbours. In simulation (3 speeds x 3 noise draws)
+    this was within 0.6%, where negative light after Tikhonov read 2.5% low. returns estimate, scores.
+    A best point at either end of omegas means the speed is outside them: the estimate is then wrong"""
+    scores = residuals(scene, P, lines, L, t_exp, omegas, rings, **kw)
     i = int(np.clip(np.argmin(scores), 1, len(scores) - 2))
     a, b, c = scores[i - 1:i + 2]
     d = a - 2 * b + c

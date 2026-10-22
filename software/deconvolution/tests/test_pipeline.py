@@ -318,3 +318,80 @@ def test_quick_calibration_end_to_end(tmp_path):
         "--solver", "tikhonov", "--lam", 1e-3, "--out", tmp_path)
     x = np.load(tmp_path / "cap_global.npy")
     assert blade_psnr(x, truth) > blade_psnr(img, truth) + 10
+
+
+def test_auto_flags_a_camera_bump_between_stills(tmp_path):
+    """three stills, the camera nudged 2 px before the middle one: two stills cannot show it, the pairs
+    of three disagree and auto says so"""
+    here = Path(__file__).parents[1]
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    rng = np.random.default_rng(3)
+    for i in range(3):
+        f = blade(rows, cols, START + 0.3 * i) + rng.normal(0, 0.005, SHAPE)
+        np.save(tmp_path / f"s{i}.npy", np.roll(f, (2, -2), (0, 1)) if i == 1 else f)
+    out = subprocess.run([sys.executable, "calibrate.py", "auto", tmp_path / "c.json", *[tmp_path / f"s{i}.npy" for i in range(3)],
+                          "--deg", str(np.degrees(0.3)), "--out", tmp_path], cwd=here, capture_output=True, text=True, check=True).stdout
+    assert "the pairs disagree" in out
+
+
+def test_wrong_rpm_sign_is_caught_and_corrected(capsys):
+    """--rpm typed with the wrong sign: the direction check deblurs the right way round and says so"""
+    img, truth = simulate()
+    rpm = OMEGA * 60 / (2 * np.pi)
+    right = capture.deblur(img, calib(), CODE, CHIP, T_EXP, rpm, "global", "tikhonov", 1e-3)[0]
+    assert "other way" not in capsys.readouterr().out                   # the right sign is left alone
+    flipped, _, used = capture.deblur(img, calib(), CODE, CHIP, T_EXP, -rpm, "global", "tikhonov", 1e-3)
+    assert "the fan turns the other way" in capsys.readouterr().out and used > 0
+    assert np.allclose(flipped, right)
+
+
+def test_blind_speed_at_the_edge_of_its_search_is_flagged(capsys):
+    """--rpm 40% low: the true speed is outside the +-20% search. (30% low can instead land on a shallow
+    false dip inside it, which is why --find-speed needs --rpm within 20%: see the README)"""
+    img, _ = simulate()
+    rpm = OMEGA * 60 / (2 * np.pi)
+    capture.deblur(img, calib(), CODE, CHIP, T_EXP, 0.6 * rpm, "global", "tikhonov", 1e-3, find_speed=True)
+    assert "at the edge of its search" in capsys.readouterr().out
+
+
+def gui_log(path, readout=0.0):
+    path.write_text(json.dumps(dict(code=dict(bits=[int(c) for c in CODE], bit_duration_s=CHIP),
+                                    actual_exposure_us=T_EXP * 1e6, readout_s=readout, frame_boundary_monotonic_ns=0,
+                                    t0_monotonic_ns=0, late_bits=0, aborted=False)))
+
+
+def test_monitor_refuses_a_blade_narrower_than_its_smear(tmp_path):
+    """a thin rod's two edges smear into each other, which the edge method cannot read: it must not save"""
+    here = Path(__file__).parents[1]
+    img, _ = simulate(texture=False, half=0.05)            # 0.1 rad wide, smear 0.33 rad
+    np.save(tmp_path / "plain.npy", img)
+    gui_log(tmp_path / "plain.json")
+    c = tmp_path / "c.json"
+    c.write_text(json.dumps(calib()))
+    r = subprocess.run([sys.executable, "calibrate.py", "monitor", tmp_path / "plain.npy", "--calib", c,
+                        "--rpm", str(OMEGA * 60 / (2 * np.pi))], cwd=here, capture_output=True, text=True)
+    assert r.returncode != 0 and "not saved" in r.stderr + r.stdout
+    assert json.loads(c.read_text())["monitor"] == calib()["monitor"]
+
+
+def test_auto_keeps_measured_monitor_values(tmp_path):
+    here = Path(__file__).parents[1]
+    f0, f1 = stills(0.3)
+    np.save(tmp_path / "s0.npy", f0)
+    np.save(tmp_path / "s1.npy", f1)
+    c = tmp_path / "c.json"
+    c.write_text(json.dumps({**calib(), "monitor": dict(black=0.01, tau=0.003, t0=0.001), "readout_s": 0.06}))
+    subprocess.run([sys.executable, "calibrate.py", "auto", c, tmp_path / "s0.npy", tmp_path / "s1.npy", "--deg",
+                    str(np.degrees(0.3)), "--out", tmp_path], cwd=here, capture_output=True, check=True)
+    saved = json.loads(c.read_text())
+    assert saved["monitor"] == dict(black=0.01, tau=0.003, t0=0.001) and saved["readout_s"] == 0.06
+
+
+def test_a_file_that_is_not_a_run_log_says_so(tmp_path):
+    log = tmp_path / "x.json"
+    log.write_text(json.dumps(dict(something="else")))
+    with pytest.raises(SystemExit, match="not a run log"):
+        real.run_log(log)
+    log.write_text(json.dumps(dict(code=dict(bits=[1], bit_duration_s=0.1), actual_exposure_us=1)))
+    with pytest.raises(SystemExit, match="not a complete run log"):
+        real.log_timing(log)
