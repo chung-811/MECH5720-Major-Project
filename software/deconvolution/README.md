@@ -6,6 +6,10 @@ a Blender simulation to test all of it before the rig exists.
 
 ## Setup
 
+The quick way: run `start-mac.command` or `start-windows.bat` from the repo root. It installs uv,
+sets this folder up, downloads the model weights and runs `check.py`, which prints one line per check
+and READY (or what to do). By hand:
+
 Needs [uv](https://docs.astral.sh/uv/), which installs Python and every package itself:
 
 ```
@@ -18,6 +22,7 @@ Then, in this folder:
 ```
 uv sync          # about 1 GB of packages (PyTorch, CPU only), about 2 minutes the first time
 uv run pytest    # 35 checks, about a minute; the first run downloads the 131 MB DRUNet weights
+uv run python check.py   # plain-English: Python, packages, weights, reads a DNG, deblurs a test blade
 ```
 
 If the tests pass, the pipeline works on your machine. Optional extras: Blender 5.2 for new renders,
@@ -150,6 +155,7 @@ Every study takes `--chip` (seconds per code bit, default 1/60).
 | `legibility.py`, `ocr.py` | criterion 2: fraction of blade characters tesseract reads, against fan speed and light |
 | `coding_gain.py` | coded vs constant light vs denoised short exposure, over blur length and light level |
 | `robust.py` | PSNR cost of black level, LCD lag, code timing, hub error, stepper motion (Tikhonov) |
+| `check.py` | is this computer ready: one line per check, then READY or what to do |
 | `tests/` | synthetic blade, no Blender needed: forward model, all three methods, DPIR, monitor fit, DNG loading |
 
 ## Deconvolution
