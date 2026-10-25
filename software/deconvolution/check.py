@@ -22,6 +22,8 @@ def line(name, ok, note=""):
 def main():
     if not line("Python", sys.version_info >= (3, 11), sys.version.split()[0]):
         return "Python 3.11 or newer is needed: run the setup script again, uv installs it"
+    print("Loading packages (the first time after a restart or a pull, macOS scans them: up to a minute,"
+          " please wait)...", flush=True)
     try:
         import numpy, scipy, skimage, rawpy, matplotlib, torch, deepinv  # noqa: F401
     except ImportError as err:
@@ -61,6 +63,10 @@ def main():
 
 
 if __name__ == "__main__":
-    problem = main()
-    print("\nREADY: see the README's \"Real captures\" for the three steps" if problem is None else f"\nNOT READY: {problem}")
+    try:
+        problem = main()
+    except KeyboardInterrupt:
+        print("\nStopped (Ctrl+C) before the checks finished: nothing is wrong, run it again and let it finish")
+        sys.exit(1)
+    print("\nREADY: see the README's \"Lab day\" section" if problem is None else f"\nNOT READY: {problem}")
     sys.exit(0 if problem is None else 1)

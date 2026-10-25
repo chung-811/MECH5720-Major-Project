@@ -24,7 +24,7 @@ fi
 uv --version
 
 step "2/4 deblur code (first time: about 1 GB of packages and 131 MB of model weights)"
-(cd software/deconvolution && uv sync -q && uv run python check.py) || fail "the deblur code is not ready: see the line above"
+(cd software/deconvolution && uv sync -q && uv run python check.py) || fail "the deblur code is not ready: see the lines above"
 
 step "3/4 camera GUI packages"
 "${GUI[@]}" python -c "import imgui_bundle, glfw, cv2, requests" 2>/dev/null \
