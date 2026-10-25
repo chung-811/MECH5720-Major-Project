@@ -1,0 +1,8 @@
+{
+  "sequence": "1011 0011 1010 0110",
+  "total_duration_s": 1.0666666666666667,
+  "repeat": 1,
+  "invert": false,
+  "pre_roll_s": 1.0,
+  "post_roll_s": 0.5
+}

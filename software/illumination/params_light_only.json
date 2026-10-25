@@ -1,0 +1,15 @@
+{
+  "sequence": "1011 0011 1010 0110",
+  "total_duration_s": 1.0,
+  "repeat": 1,
+  "invert": false,
+  "pre_roll_s": 0,
+  "post_roll_s": 0,
+  "end_color": "black",
+  "wait_for_start": true,
+
+  "capture": false,
+  "out_path": "data/coded",
+  "analogue_gain": 1.0,
+  "exposure_padding_s": 0.0
+}

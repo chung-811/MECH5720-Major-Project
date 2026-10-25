@@ -1,3 +1,6 @@
 .venv/
 output/
-*.pyc
+__pycache__/
+renders/
+out/
+.DS_Store

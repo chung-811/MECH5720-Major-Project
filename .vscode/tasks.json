@@ -1,0 +1,117 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "1. Lab: set up everything and connect a camera",
+      "detail": "installs uv and packages, checks the deblur code (READY), then copies the server to the Pi and opens the camera GUI",
+      "type": "shell",
+      "command": "./start-mac.command",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "windows": {
+        "command": "start-windows.bat",
+        "options": {
+          "cwd": "${workspaceFolder}",
+          "shell": {
+            "executable": "cmd.exe",
+            "args": [
+              "/d",
+              "/c"
+            ]
+          }
+        }
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "focus": true,
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "2. Check: is this computer ready",
+      "detail": "one line per check, then READY or what to do",
+      "type": "shell",
+      "command": "export PATH=\"$HOME/.local/bin:$PATH\"; uv run python check.py",
+      "options": {
+        "cwd": "${workspaceFolder}/software/deconvolution"
+      },
+      "windows": {
+        "command": "set \"PATH=%USERPROFILE%\\.local\\bin;%PATH%\" && uv run python check.py",
+        "options": {
+          "cwd": "${workspaceFolder}\\software\\deconvolution",
+          "shell": {
+            "executable": "cmd.exe",
+            "args": [
+              "/d",
+              "/c"
+            ]
+          }
+        }
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "focus": true,
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "3. Tests: run all checks",
+      "detail": "35 automated checks of the deblur pipeline, about a minute",
+      "type": "shell",
+      "command": "export PATH=\"$HOME/.local/bin:$PATH\"; uv run pytest -q",
+      "options": {
+        "cwd": "${workspaceFolder}/software/deconvolution"
+      },
+      "windows": {
+        "command": "set \"PATH=%USERPROFILE%\\.local\\bin;%PATH%\" && uv run pytest -q",
+        "options": {
+          "cwd": "${workspaceFolder}\\software\\deconvolution",
+          "shell": {
+            "executable": "cmd.exe",
+            "args": [
+              "/d",
+              "/c"
+            ]
+          }
+        }
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "focus": true,
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "4. Open a deblur terminal",
+      "detail": "a terminal in software/deconvolution, for calibrate.py and the deblur scripts",
+      "type": "shell",
+      "command": "export PATH=\"$HOME/.local/bin:$PATH\"; exec $SHELL",
+      "options": {
+        "cwd": "${workspaceFolder}/software/deconvolution"
+      },
+      "windows": {
+        "command": "set \"PATH=%USERPROFILE%\\.local\\bin;%PATH%\" && cmd /k",
+        "options": {
+          "cwd": "${workspaceFolder}\\software\\deconvolution",
+          "shell": {
+            "executable": "cmd.exe",
+            "args": [
+              "/d",
+              "/c"
+            ]
+          }
+        }
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "focus": true,
+        "clear": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}
