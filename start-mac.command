@@ -48,10 +48,13 @@ COPYFILE_DISABLE=1 tar -cf - --exclude __pycache__ -C software/data_capture "$fo
 
 echo "Starting the camera server on the Pi. Password again: mech5720"
 # -f: background after the password; -tt: the server gets a terminal, so it stops when the tunnel closes.
-# Any server left from an earlier run is stopped first. The pattern is anchored to "python" at the start,
+# Any server left from an earlier run is stopped first. The pattern is anchored to the python path at the start,
 # so it can't match the Pi's own shell running this command line (which also contains "stream.py").
+# Then the first Python with flask and picamera2 runs it: the system one, or a venv in the home folder (e.g. ~/mech5720).
 ssh "${SSH_OPTS[@]}" -f -tt -o ExitOnForwardFailure=yes -L "$PORT:localhost:8000" "$PI" \
-    "pkill -f '^python3? .*stream[.]py'; sleep 1; cd ~/$folder && exec python3 stream.py" \
+    "pkill -f '^[^ ]*python3? .*stream[.]py'; sleep 1
+     for p in python3 ~/*/bin/python3; do \$p -c 'import flask, picamera2' 2>/dev/null && break; p=; done
+     cd ~/$folder && exec \${p:-python3} stream.py" \
     || fail "could not start the camera server on the Pi"
 
 printf 'Waiting for the camera'
