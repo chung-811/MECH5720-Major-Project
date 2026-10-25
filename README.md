@@ -2,15 +2,19 @@
 
 ## Quick start in the lab
 
-Plug the Pi into the computer by ethernet, then run one file from this folder:
+Plug the Pi into the computer by ethernet, then either:
 
+- **VS Code:** open this folder, then Terminal > Run Task > **1. Lab: set up everything and connect a camera**
+  (the other tasks: check the computer is ready, run the tests, open a deblur terminal)
 - **Mac:** double-click `start-mac.command` (or `./start-mac.command` in a terminal)
 - **Windows:** double-click `start-windows.bat`
 
 It installs everything the first time (about 3 minutes, needs internet), checks the deblur code and prints
 READY, then asks which camera to connect to, copies the camera server to the Pi, starts it and opens the
 camera GUI. The Pi password is `mech5720`. Run it again any time; what is done already is skipped.
-Captures land in `output/`; to deblur them see `software/deconvolution/README.md` ("Real captures").
+Captures land in `output/`; to deblur them see `software/deconvolution/README.md` ("Real captures"), and its
+"Lab day checklist" for the order of shots. The fan: `software/motor_control/test.ino` on the Arduino, driven
+from the Arduino Serial Monitor (`v 5` sets 5 rpm, `s 400` turns 400 steps, `r 5` turns 5 revolutions).
 
 ## Team and Roles
 - Jack Thompson (490386475): Coded sequence design and deblurring pipeline
@@ -69,6 +73,8 @@ controlled via a stepper motor, so that the speed can be controlled and recorded
 
 - `start-mac.command`, `start-windows.bat`: the one-file lab setup above.
 - `software/data_capture`: camera server (on the Pi) and camera GUI with coded capture (see its README).
+- `software/motor_control`: the fan's Arduino sketch (stepper speed and exact turns over serial).
+- `software/coded_sequence`: code design (Raskar 52-chip code and its constant-light twin).
 - `software/illumination`: monitor code display and synchronised capture on the Pi (see its README).
 - `software/deconvolution`: deblurring by the three methods, blind speed, calibration, and the Blender
   simulation. `uv run python check.py` there says whether a computer is ready; see its README.

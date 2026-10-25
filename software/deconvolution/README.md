@@ -48,24 +48,25 @@ on each blade, different letters on each, at least 5 to 8 mm tall.
 | Shot | Used for |
 | --- | --- |
 | coded captures of the spinning fan, commanded rpm noted | the result |
-| three stills of the stopped fan, each 200 steps on from the last (not 680: 120 deg looks the same on a 3-blade fan) | `calibrate.py auto`: hub, blade radii, turn direction, and a check nothing moved |
+| three stills of the stopped fan, each `s 400` on from the last with Ben's sketch (not 1359 steps: 120 deg looks the same on a 3-blade fan) | `calibrate.py auto`: hub, blade radii, turn direction, and a check nothing moved |
 | about 10 coded captures of a blade with nothing printed near its leading edge, each started from the same blade angle (global shutter) | monitor (optional) |
 | a still of the stopped fan in constant light, in the same setup as the captures | `--reference` (criterion 1 scoring) |
 
-Set `total_duration_s` in the code file to a whole number of refreshes per bit (16 bits at 4
-refreshes of a 60 Hz monitor = 1.0667 s): the screen only changes on a refresh.
+Use `code_16bit_4refresh.json` (and `flat_16bit_4refresh.json` for steady light) in the camera GUI: 16
+bits of exactly 4 refreshes of a 60 Hz monitor (1.0667 s). The screen only changes on a refresh, so
+the 1 s files give bits of 3.75 refreshes, shown unevenly.
 
 ### Steps
 
 The only values you type are the stepper turn between the two hub stills and the fan speed.
 
 ```
-# 1. calibration from three stills of the stopped fan, each 200 steps on (28BYJ-48: about 2038 full
-#    steps per rev). Finds the hub, the blade radii and which way the fan turns, no guess needed, and
+# 1. calibration from three stills of the stopped fan, each `s 400` on (Ben's sketch half-steps: about
+#    4076 steps per rev; take up the gearbox slack with `s 200` first). Finds the hub, the blade radii and which way the fan turns, no guess needed, and
 #    warns if the pairs of stills disagree (something moved: retake them). Two stills also work, unchecked.
 #    Check out/<still1>_auto.png: the + on the axle, the blade between the two circles
-uv run python calibrate.py auto gs.json gs_still0.dng gs_still1.dng gs_still2.dng --steps 200 --steps-per-rev 2038
-uv run python calibrate.py auto rs.json rs_still0.dng rs_still1.dng rs_still2.dng --steps 200 --steps-per-rev 2038
+uv run python calibrate.py auto gs.json gs_still0.dng gs_still1.dng gs_still2.dng --steps 400 --steps-per-rev 4076
+uv run python calibrate.py auto rs.json rs_still0.dng rs_still1.dng rs_still2.dng --steps 400 --steps-per-rev 4076
 
 # 2. monitor (optional): black level, LCD lag and a check every bit showed as coded, from coded
 #    captures of a plain blade wider than its smear, all started from the same blade angle (or just
@@ -224,23 +225,32 @@ Cost per deblur at 2.8 rpm with 40-50 mm blades: 7 s and 0.8 GB at 10 px/mm, 11 
 One solver serves all three methods; they differ only in which exposure window each polar sample
 gets. Blade geometry and sensor noise numbers are placeholders until the fan and cameras are measured.
 
-## Capturing on the rig
+## Lab day checklist
 
-What the simulation says the real captures need, and the Lab 4 lessons:
+With Ben's fan (`software/motor_control/test.ino`, Arduino Uno + ULN2003 + 28BYJ-48). His sketch takes
+commands in the Arduino Serial Monitor at 9600 baud: `v 5` sets 5 rpm, `s 400` turns 400 steps, `r 5`
+turns 5 revolutions. It half-steps, so one revolution is about **4076** steps (not 2038, the full-step
+count). Opening the serial port resets the Uno and replays its startup demo: wait for the help text.
 
-1. Dark room, black backdrop, manual exposure and gain (no auto anything), DNG only. Log every file
-   with its condition as it is taken, and check clipping (under 0.1% of photosites at white) before
-   leaving the lab.
-2. Dark frames: 10 with the lens capped, at the capture exposure and gain.
-3. Hub: fan stopped, constant light, one still; step the motor 100 full steps (about 18 deg; at least
-   30), second still, then `calibrate.py hub`. Count the real steps per revolution once (28BYJ-48:
-   about 2038, not 2048). In simulation a 4 deg turn found the hub to 0.4 px, and the deblur tolerates 5 px.
-4. Reference: a sharp still of the stopped blade, the ground truth for PSNR and OCR.
-5. Monitor: 10 coded captures of a plain blade (nothing printed within the smear of its leading edge,
-   blade wider than the smear) at about 2.8 rpm, the code and exposure used for the real captures, then
-   `calibrate.py monitor`. In simulation this recovered 80% of the 2.1 dB lost to a 3% black level and a
-   3 ms LCD lag; one frame recovered none of it.
-6. Captures: at least 10 per speed per condition (coded, constant, one-chip short), one monitor
-   brightness throughout, commanded rpm recorded.
-7. Rolling shutter: record the sensor mode (`picam2.camera_configuration()["raw"]`), and take the two
-   stills for `calibrate.py readout` (step 5 above) with the same params as the real captures.
+1. Rig: dark room or black backdrop, **matte black over the front of the white stand** (a bright still
+   surface behind the blades took a simulated deblur from 33 dB to 9 dB), a white card paddle with
+   letters on each blade (different letters, at least 5 to 8 mm tall), camera about 33 cm away with the
+   fan filling the frame. Manual exposure and gain, nothing automatic.
+2. Software: run `start-mac.command` / `start-windows.bat` from the repo root: READY, then pick the camera.
+3. Gearbox slack: `s 200` once before the first still, then step every still the same way.
+4. Calibration stills, per camera, fan stopped, constant light, same gain, nothing touched in between:
+   still, `s 400`, still, `s 400`, still. Then
+   `calibrate.py auto gs.json s0.dng s1.dng s2.dng --steps 400 --steps-per-rev 4076`. Not 1359 steps:
+   that is 120 deg, where a 3-blade fan looks the same.
+5. Reference: one still of the stopped fan in constant light, same setup (for `--reference`).
+6. Check before collecting everything: two or three coded captures (`code_16bit_4refresh.json` in the
+   camera GUI), then `global-shutter.py ... --rpm 5 --reference ref.dng`. Look for readable letters and no
+   "pairs disagree" or "turns the other way" message. Fix the rig now if not.
+7. Dataset: for each speed (`v 3`, `v 5`, `v 8`, `v 10`, then `r 5` to spin, capture while it turns) at
+   least 10 coded captures, 10 under steady light (`flat_16bit_4refresh.json`) and 10 short plain
+   exposures, for criterion 2. Write down the commanded rpm for every file. Ben's sketch counts 4096
+   steps per rev where the motor has about 4076, which alone makes `v 5` about 0.5% fast; the Uno's time
+   per step slows it a little, by an amount the code cannot tell. Time a few revolutions if criterion 3
+   needs the true speed to better than 1%.
+8. Rolling shutter camera: steps 4 to 7 again.
+9. Before leaving: copy `output/` to the shared drive; note gain, speeds and anything that went wrong.

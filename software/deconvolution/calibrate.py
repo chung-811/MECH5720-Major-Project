@@ -213,7 +213,8 @@ p.add_argument("stills", nargs="+", help="2 or more stills in order, each the sa
                "also check nothing moved between them")
 p.add_argument("--steps", type=float, help="the turn between consecutive stills in stepper steps (sign is found)")
 p.add_argument("--steps-per-rev", type=float,
-               help="with --steps: steps per revolution in the driver's step mode (28BYJ-48: about 2038 full steps)")
+               help="with --steps: steps per revolution in the driver's step mode (28BYJ-48: about 4076 "
+               "half-steps, as Ben's sketch drives it, or 2038 full steps)")
 p.add_argument("--deg", type=float, help="or the turn in degrees")
 p.add_argument("--readout", type=float, help="first to last line, s; left out: kept from an existing calibration, "
                "else 0 (global shutter, or taken from the run log)")
@@ -240,7 +241,8 @@ p.add_argument("still1")
 p.add_argument("--deg", type=float, help="turn from still0 to still1, + = counter-clockwise as displayed")
 p.add_argument("--steps", type=float, help="or the turn in stepper steps, + = counter-clockwise as displayed")
 p.add_argument("--steps-per-rev", type=float,
-               help="with --steps: steps per revolution in the driver's step mode (28BYJ-48: about 2038 full steps)")
+               help="with --steps: steps per revolution in the driver's step mode (28BYJ-48: about 4076 "
+               "half-steps, as Ben's sketch drives it, or 2038 full steps)")
 p.set_defaults(run=hub)
 p = sub.add_parser("monitor", help="fit the monitor from coded captures of a plain blade (global shutter)")
 p.add_argument("dng", nargs="+", help="coded captures of a blade with nothing printed near its leading edge, "
