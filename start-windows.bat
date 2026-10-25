@@ -51,13 +51,16 @@ if /i "%CAM%"=="g" (set FOLDER=global) else if /i "%CAM%"=="r" (set FOLDER=rolli
 )
 
 echo Copying the %FOLDER% camera server to the Pi (%PI%). Password: mech5720
-tar -C software\data_capture -cf - %FOLDER% coded | ssh %SSH_OPTS% %PI% "chmod -R u+w ~/%FOLDER% ~/coded 2>/dev/null; tar -xf - -C ~ && chmod -R u+w ~/%FOLDER% ~/coded"
-if errorlevel 1 (set "MSG=could not reach the Pi: is it on, plugged into this computer by ethernet, and is %PI% right?" & goto :fail)
+rem OneDrive marks folders read-only, and tar carries that over, so the Pi's old copy is removed and a fresh one
+rem unpacked (the Pi keeps nothing of its own in these folders). The Pi's clock is often behind: hide those warnings.
+tar -cf - --exclude __pycache__ -C software\data_capture %FOLDER% coded | ssh %SSH_OPTS% %PI% "chmod -R u+w ~/%FOLDER% ~/coded 2>/dev/null; rm -rf ~/%FOLDER% ~/coded && tar -xf - -C ~ --warning=no-timestamp --warning=no-unknown-keyword && chmod -R u+w ~/%FOLDER% ~/coded"
+if errorlevel 255 (set "MSG=could not reach the Pi: is it on, plugged into this computer by ethernet, and is %PI% right?" & goto :fail)
+if errorlevel 1 (set "MSG=reached the Pi but could not replace ~/%FOLDER% and ~/coded there: see the lines above" & goto :fail)
 
 echo.
 echo Starting the camera server on the Pi in a NEW WINDOW: type the Pi password (mech5720) there.
 echo Leave that window open while you use the camera; closing it stops the server.
-start "Pi camera server" ssh %SSH_OPTS% -tt -o ExitOnForwardFailure=yes -L %PORT%:localhost:8000 %PI% "pkill -f '[s]tream.py'; sleep 1; cd ~/%FOLDER% && exec python3 stream.py"
+start "Pi camera server" ssh %SSH_OPTS% -tt -o ExitOnForwardFailure=yes -L %PORT%:localhost:8000 %PI% "pkill -f '^python3? .*stream[.]py'; sleep 1; cd ~/%FOLDER% && exec python3 stream.py"
 
 echo Waiting for the camera (up to 2 minutes, while you type the password)...
 for /l %%i in (1,1,120) do (

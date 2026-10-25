@@ -41,15 +41,17 @@ esac
 
 pkill -f "$PORT:localhost:8000" 2>/dev/null || true                   # an old tunnel from a last run
 echo "Copying the $folder camera server to the Pi ($PI). Password: mech5720"
-tar -C software/data_capture -cf - "$folder" coded \
-    | ssh "${SSH_OPTS[@]}" "$PI" "chmod -R u+w ~/$folder ~/coded 2>/dev/null; tar -xf - -C ~ && chmod -R u+w ~/$folder ~/coded" \
+# The Pi's old copy is removed first so stale read-only folders can't block the unpack (the Pi keeps nothing of its own there).
+COPYFILE_DISABLE=1 tar -cf - --exclude __pycache__ -C software/data_capture "$folder" coded \
+    | ssh "${SSH_OPTS[@]}" "$PI" "chmod -R u+w ~/$folder ~/coded 2>/dev/null; rm -rf ~/$folder ~/coded && tar -xf - -C ~ --warning=no-timestamp --warning=no-unknown-keyword && chmod -R u+w ~/$folder ~/coded" \
     || fail "could not reach the Pi: is it on, plugged into this computer by ethernet, and is $PI right?"
 
 echo "Starting the camera server on the Pi. Password again: mech5720"
 # -f: background after the password; -tt: the server gets a terminal, so it stops when the tunnel closes.
-# Any server left from an earlier run is stopped first ([s] so pkill does not match this command itself).
+# Any server left from an earlier run is stopped first. The pattern is anchored to "python" at the start,
+# so it can't match the Pi's own shell running this command line (which also contains "stream.py").
 ssh "${SSH_OPTS[@]}" -f -tt -o ExitOnForwardFailure=yes -L "$PORT:localhost:8000" "$PI" \
-    "pkill -f '[s]tream.py'; sleep 1; cd ~/$folder && exec python3 stream.py" \
+    "pkill -f '^python3? .*stream[.]py'; sleep 1; cd ~/$folder && exec python3 stream.py" \
     || fail "could not start the camera server on the Pi"
 
 printf 'Waiting for the camera'
