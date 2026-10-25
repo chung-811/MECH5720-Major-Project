@@ -1,5 +1,17 @@
 # MECH5720 Major Project: Flutter Shutter/Coded Illumination
 
+## Quick start in the lab
+
+Plug the Pi into the computer by ethernet, then run one file from this folder:
+
+- **Mac:** double-click `start-mac.command` (or `./start-mac.command` in a terminal)
+- **Windows:** double-click `start-windows.bat`
+
+It installs everything the first time (about 3 minutes, needs internet), checks the deblur code and prints
+READY, then asks which camera to connect to, copies the camera server to the Pi, starts it and opens the
+camera GUI. The Pi password is `mech5720`. Run it again any time; what is done already is skipped.
+Captures land in `output/`; to deblur them see `software/deconvolution/README.md` ("Real captures").
+
 ## Team and Roles
 - Jack Thompson (490386475): Coded sequence design and deblurring pipeline
 - Oliver Turner (520419913): Camera control and calibration in setup
@@ -52,3 +64,11 @@ We will build: A coded illumination rig using a monitor displaying black/white s
 while the global shutter camera and rolling shutter camera hold one continuous exposure, so the target’s motion is
 convolved with a broadband code instead of a simple box blur. This will be tested primarily with a spinning fan
 controlled via a stepper motor, so that the speed can be controlled and recorded.
+
+## Software
+
+- `start-mac.command`, `start-windows.bat`: the one-file lab setup above.
+- `software/data_capture`: camera server (on the Pi) and camera GUI with coded capture (see its README).
+- `software/illumination`: monitor code display and synchronised capture on the Pi (see its README).
+- `software/deconvolution`: deblurring by the three methods, blind speed, calibration, and the Blender
+  simulation. `uv run python check.py` there says whether a computer is ready; see its README.
