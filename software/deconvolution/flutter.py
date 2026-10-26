@@ -11,6 +11,8 @@ Deblur model. Unwrapped about the hub, the blade turns by omega t along theta, s
 one matrix A per radius over the arc in view. The arc does not wrap, so x carries extra samples
 behind the window for the light that moved into it. Global shutter: the same w for every sample.
 Rolling shutter per-row: w from the sample's own sensor line. Per-frame: one line's w for all.
+Polar samples that fall outside the image carry no data: unwrap marks them with a NaN sensor line, and
+every solver here gives them a zero row in A, so they constrain nothing (they used to be fitted as black).
 """
 from functools import lru_cache
 from types import SimpleNamespace
@@ -22,6 +24,12 @@ from skimage.restoration import estimate_sigma
 from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similarity as ssim
 
 CHIP = 1 / 60                                               # one monitor refresh
+INTERP = 3          # spline order of the polar unwrap and wrap back. Bilinear (1) twice capped a still blade's
+                    # round trip at 38-40 dB in simulation; cubic lifts it to 49-52 dB and the honest deblur PSNR
+                    # (against the untouched render) by 1.1 dB (photo on the blade) to 4.6 dB (letters).
+                    # The speed search and direction check stay on bilinear data (SPEED_INTERP): on cubic data the
+                    # search fell to the edge of its range with the true speed 18% above --rpm, inside it
+SPEED_INTERP = 1
 RASKAR52 = "1010000111000001010000110011110111010111001001100111"   # Raskar 2006, sec 3.2
 
 
@@ -67,20 +75,21 @@ def sensor(img, flux, rng, full_e=10000, read_e=3.0, bits=10, gain=1.0):
     return dn * step / flux
 
 
-def polar(img, centre, r, th):
-    """samples at radii r and angles th (counter-clockwise from +x on screen), with their rows and cols"""
+def polar(img, centre, r, th, order=1):
+    """samples at radii r and angles th (counter-clockwise from +x on screen), with their rows and cols.
+    Outside the image a sample reads 0. order: spline order (1 bilinear, 3 cubic)"""
     rows = centre[0] - r[:, None] * np.sin(th)
     cols = centre[1] + r[:, None] * np.cos(th)
-    return map_coordinates(img, [rows, cols], order=1), rows, cols
+    return map_coordinates(img, [rows, cols], order=order), rows, cols
 
 
-def cartesian(p, centre, r, th, shape):
+def cartesian(p, centre, r, th, shape, order=1):
     """inverse of polar, zero outside the sampled radii and angles. th[0] in (-pi, pi], see grid"""
     yy, xx = np.mgrid[:shape[0], :shape[1]]
     rr = np.hypot(yy - centre[0], xx - centre[1])
     ang = np.arctan2(centre[0] - yy, xx - centre[1])
     ang = np.where(ang < th[0], ang + 2 * np.pi, ang)          # measured on from th[0], for arcs past +-pi
-    out = map_coordinates(p, [(rr - r[0]) / (r[1] - r[0]), (ang - th[0]) / (th[1] - th[0])], order=1, mode="nearest")
+    out = map_coordinates(p, [(rr - r[0]) / (r[1] - r[0]), (ang - th[0]) / (th[1] - th[0])], order=order, mode="nearest")
     out[(rr < r[0]) | (rr > r[-1]) | (ang < th[0]) | (ang > th[-1])] = 0
     return out
 
@@ -113,25 +122,35 @@ def _starts(lines_k, t_line, per_row, ref_line):
     return (lines_k if t_line and per_row else np.array([ref_line])) * t_line
 
 
+def _ring(scene, L, t_exp, lines_k, omega, n, t_line, per_row, ref_line):
+    """(A, m) of one ring of n samples, with a zero row for each sample outside the image (NaN line)"""
+    inside = np.isfinite(lines_k)
+    w = weights(scene.t, scene.dt, L, t_exp, _starts(np.where(inside, lines_k, 0.0), t_line, per_row, ref_line))
+    A, m = ring_matrix(w, scene.t, omega, scene.dtheta, n)
+    A[~inside] = 0.0
+    return A, m
+
+
 def tikhonov(scene, P, lines, L, t_exp, lam, t_line=0.0, per_row=True, ref_line=0, omega=None):
-    """fast baseline deblur, ring by ring. P: polar image, lines: sensor line of each sample,
-    L: monitor brightness at scene.t. per_row=False uses ref_line's timing for every sample"""
+    """fast baseline deblur, ring by ring. P: polar image, lines: sensor line of each sample (NaN outside
+    the image), L: monitor brightness at scene.t. per_row=False uses ref_line's timing for every sample.
+    A ring entirely outside the image has no data and comes back 0"""
     om = scene.omega if omega is None else omega
-    out = np.empty_like(P)
+    out = np.zeros_like(P)
     for k in range(len(P)):
-        w = weights(scene.t, scene.dt, L, t_exp, _starts(lines[k], t_line, per_row, ref_line))
-        out[k] = tikhonov_ring(*ring_matrix(w, scene.t, om, scene.dtheta, P.shape[1]), P[k], lam)
+        if np.isfinite(lines[k]).any():
+            A, m = _ring(scene, L, t_exp, lines[k], om, P.shape[1], t_line, per_row, ref_line)
+            out[k] = tikhonov_ring(A, m, np.where(np.isfinite(lines[k]), P[k], 0.0), lam)
     return out
 
 
 def forward_model(scene, L, t_exp, lines, t_line=0.0, per_row=True, ref_line=0, omega=None):
     """(A, m): sparse forward model of every ring in `lines`, polar image (R, N) -> polar data (R, n).
-    omega defaults to scene.omega"""
+    A sample outside the image (NaN line) gets a zero row. omega defaults to scene.omega"""
     om = scene.omega if omega is None else omega
     blocks = []
     for k in range(len(lines)):
-        w = weights(scene.t, scene.dt, L, t_exp, _starts(lines[k], t_line, per_row, ref_line))
-        Ak, m = ring_matrix(w, scene.t, om, scene.dtheta, len(scene.th))
+        Ak, m = _ring(scene, L, t_exp, lines[k], om, len(scene.th), t_line, per_row, ref_line)
         blocks.append(sp.csr_matrix(Ak))
     return sp.block_diag(blocks, format="csr"), m
 
@@ -143,6 +162,25 @@ def _drunet():
 
 
 NOISE_GAIN = 6.0     # DPIR noise level / estimate_sigma on the polar data, see dpir
+BLADE_NOISE_GAIN = 1.5   # DPIR noise level / blade_noise on the raw capture. Over five simulated scenes (letters,
+                         # photo, photo at a tenth of the light, the test blade, rolling shutter) it is never more
+                         # than 1.0 dB below each scene's best gain; 2.0 loses up to 2.2 dB, and 1.0 collapses
+
+
+def blade_noise(img, window):
+    """noise std of the blade in a raw capture: median absolute finest diagonal detail of 2x2 pixel blocks
+    (Donoho's estimator, as skimage's estimate_sigma) over blocks inside `window` (bool, image shape) that are
+    bright. Shot noise grows with brightness, so a whole-image estimate is pulled down by the dark background
+    (one sixth of the blade's noise in simulation); this read 0.91-1.03 of the blade's true noise.
+    None when fewer than 100 bright blocks"""
+    h, w = img.shape[0] // 2 * 2, img.shape[1] // 2 * 2
+    a, b, c, d = img[0:h:2, 0:w:2], img[0:h:2, 1:w:2], img[1:h:2, 0:w:2], img[1:h:2, 1:w:2]
+    detail, mean = (a - b - c + d) / 2, (a + b + c + d) / 4
+    inside = window[0:h:2, 0:w:2] & window[1:h:2, 1:w:2]
+    if not inside.any():
+        return None
+    bright = inside & (mean > 0.5 * np.percentile(mean[inside], 99))
+    return float(np.median(np.abs(detail[bright])) / 0.6745) if bright.sum() >= 100 else None
 
 
 def dpir(A, m, P, sigma=None, full=False):
@@ -152,32 +190,45 @@ def dpir(A, m, P, sigma=None, full=False):
     (26 on-bits x 1/60 s), real captures 1. sigma: the noise level DPIR uses, in units of P. When None:
     estimate_sigma on the polar data reads 0.31-0.35 of the true noise (resampling smooths it; two scenes,
     light 1x to 0.03x, both shutters), and DPIR did best at 2x the true noise in all of those and in OCR,
-    so NOISE_GAIN x the estimate. full: return the whole polar estimate (R, N) instead of the window"""
+    so NOISE_GAIN x the estimate; real captures pass sigma from blade_noise instead. Rows of A that are all
+    zero (samples outside the image) carry no data and are left out of the gain and the brightness scale.
+    The data is then scaled so its bright end (99th percentile) is 1, the range DRUNet was trained on: end to
+    end through capture.deblur, the same capture at 0.15x brightness lost 2.4 dB without this, and none with it.
+    full: return the whole polar estimate (R, N) instead of the window"""
     import torch
     import deepinv as dinv
     R, n = P.shape
     N = A.shape[1] // R
-    g = float(np.asarray(A.sum(1)).mean())                   # gain: mean row sum of the forward model
+    rowsum = np.asarray(A.sum(1)).ravel()
+    data = rowsum > 0                                        # samples inside the image
+    if not data.any():
+        raise ValueError("no polar sample falls inside the image: check the hub and radii")
+    g = float(rowsum[data].mean())                           # gain: mean row sum of the forward model
     A, P = A / g, P / g
     sigma = NOISE_GAIN * float(estimate_sigma(P)) if sigma is None else sigma / g
+    scale = float(np.percentile(P.ravel()[data], 99))
+    scale = scale if scale > 0 else 1.0
+    P, sigma = P / scale, sigma / scale
     fwd = lambda X: torch.from_numpy(A @ X.numpy().ravel()).float().reshape(1, 1, R, n)
     adj = lambda Y: torch.from_numpy(A.T @ Y.numpy().ravel()).float().reshape(1, 1, R, N)
     with torch.no_grad():
         X = dinv.optim.DPIR(sigma=sigma, denoiser=_drunet())(torch.from_numpy(P).float()[None, None],
                                                              dinv.physics.LinearPhysics(A=fwd, A_adjoint=adj))
-    return X.numpy()[0, 0] if full else X.numpy()[0, 0][:, m:m + n]
+    X = X.numpy()[0, 0] * scale
+    return X if full else X[:, m:m + n]
 
 
-def residuals(scene, P, lines, L, t_exp, omegas, rings=64, **kw):
+def residuals(scene, P, lines, L, t_exp, omegas, rings=64, sigma=None, **kw):
     """|A X - P| of the DPIR deblur at each speed, on a band of rings mid-blade: how well each speed
     explains the data. A wrong speed (or direction) predicts the blur wrongly and the prior will not
-    let DPIR fit it anyway"""
+    let DPIR fit it anyway. Samples outside the image are left out. sigma: as in dpir"""
     band = slice(max(0, len(P) // 2 - rings // 2), len(P) // 2 + rings // 2)
+    Pb = np.where(np.isfinite(lines[band]), P[band], 0.0)
     out = []
     for om in omegas:
         A, m = forward_model(scene, L, t_exp, lines[band], omega=om, **kw)
-        X = dpir(A, m, P[band], full=True)
-        out.append(np.linalg.norm(A @ X.ravel() - P[band].ravel()))
+        X = dpir(A, m, Pb, sigma=sigma, full=True)
+        out.append(np.linalg.norm(A @ X.ravel() - Pb.ravel()))
     return np.array(out)
 
 
@@ -223,14 +274,16 @@ def load(path, axis=1, pad=0.02):
     return scene
 
 
-def unwrap(scene, img):
-    """polar image and the sensor line of each sample"""
-    P, rows, cols = polar(img, scene.hub, scene.r, scene.th)
-    return P, (cols if scene.axis else rows)
+def unwrap(scene, img, order=None):
+    """polar image and the sensor line of each sample; the line is NaN where the sample falls outside the
+    image, so the solvers ignore it (see the module docstring). order: spline order, default INTERP"""
+    P, rows, cols = polar(img, scene.hub, scene.r, scene.th, INTERP if order is None else order)
+    inside = (rows >= 0) & (rows <= scene.shape[0] - 1) & (cols >= 0) & (cols <= scene.shape[1] - 1)
+    return P, np.where(inside, cols if scene.axis else rows, np.nan)
 
 
 def wrap(scene, P):
-    return cartesian(P, scene.hub, scene.r, scene.th, scene.shape)
+    return cartesian(P, scene.hub, scene.r, scene.th, scene.shape, INTERP)
 
 
 def capture(scene, L, t_exp, flux, rng, t_line=0.0, gain=1.0, **noise):

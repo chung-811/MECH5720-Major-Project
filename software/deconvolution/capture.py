@@ -67,7 +67,14 @@ def deblur(img, calib, code, chip, t_exp, rpm, method, solver="dpir", lam=1e-2, 
     kw = dict(t_line=readout / scene.n_lines, per_row=method == "rs-row", ref_line=scene.n_lines // 2)
     print(f"  {len(scene.r)} rings x {len(scene.th)} arc samples, {len(scene.t)} sub-frames of {scene.dt * 1e3:.2f} ms")
     P, lines = F.unwrap(scene, img)
-    right, wrong = F.residuals(scene, P, lines, L, t_exp, [scene.omega, -scene.omega], **kw)
+    Ps = F.unwrap(scene, img, F.SPEED_INTERP)[0]   # for the direction check and speed search (F.SPEED_INTERP)
+    if np.isnan(lines).any():
+        print(f"  {100 * np.isnan(lines).mean():.0f}% of the arc falls outside the image: left out of the fit")
+    noise = F.blade_noise(img, F.wrap(scene, np.ones((len(scene.r), len(scene.th)))) > 0.5)
+    sigma = None if noise is None else F.BLADE_NOISE_GAIN * noise
+    if noise is None:
+        print("  warning: too few bright blade pixels to measure the noise, so DPIR estimates it from the whole arc")
+    right, wrong = F.residuals(scene, Ps, lines, L, t_exp, [scene.omega, -scene.omega], **kw)
     if wrong < SIGN_MARGIN * right:              # the other direction explains the capture clearly better
         print(f"  *** the fan turns the other way to --rpm: {-rpm:+g} rpm fits {right / wrong:.1f}x better, deblurring "
               f"at that. Check --rpm's sign (calibrate.py auto prints it)")
@@ -77,14 +84,14 @@ def deblur(img, calib, code, chip, t_exp, rpm, method, solver="dpir", lam=1e-2, 
               f"{100 * (1 - SIGN_MARGIN):.0f}%), keeping --rpm's sign")
     if find_speed:
         grid = scene.omega * np.linspace(0.8, 1.2, 21)
-        est, scores = F.speed(scene, P, lines, L, t_exp, grid, **kw)
+        est, scores = F.speed(scene, Ps, lines, L, t_exp, grid, **kw)
         print(f"  blind speed {est * 60 / (2 * np.pi):.3f} rpm (commanded {rpm:.3f})")
         if np.argmin(scores) in (0, len(grid) - 1):
             print(f"  *** the blind speed is at the edge of its search ({0.8 * rpm:.3f} to {1.2 * rpm:.3f} rpm), so the "
                   f"true speed is outside it and this estimate is wrong: rerun with --rpm nearer the true speed")
         scene.omega = est
     if solver == "dpir":
-        x = F.dpir(*F.forward_model(scene, L, t_exp, lines, **kw), P)
+        x = F.dpir(*F.forward_model(scene, L, t_exp, lines, **kw), P, sigma=sigma)
     else:
         x = F.tikhonov(scene, P, lines, L, t_exp, lam, **kw)
     return F.wrap(scene, x), scene, scene.omega * 60 / (2 * np.pi)
@@ -104,6 +111,9 @@ def compare(x, scene, ref):
     """(reference turned and scaled onto x, PSNR, SSIM, PSNR by band of sensor lines) over the blade.
     The still is turned to where the deblurred blade is (real.align) and given one gain fitted to x, as
     the two are exposed differently; units are fractions of white, as in the simulation"""
+    if ref.shape != x.shape:
+        raise SystemExit(f"the reference is {ref.shape[1]} x {ref.shape[0]} but the capture is {x.shape[1]} x "
+                         f"{x.shape[0]}: take the reference still in the same camera mode as the coded captures")
     turned = real.align(ref, x, scene.hub, scene.r, scene.th)[0]
     window = F.wrap(scene, np.ones((len(scene.r), len(scene.th)))) > 0.5
     turned = turned * (x[window] @ turned[window]) / (turned[window] @ turned[window])

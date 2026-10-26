@@ -395,3 +395,49 @@ def test_a_file_that_is_not_a_run_log_says_so(tmp_path):
     log.write_text(json.dumps(dict(code=dict(bits=[1], bit_duration_s=0.1), actual_exposure_us=1)))
     with pytest.raises(SystemExit, match="not a complete run log"):
         real.log_timing(log)
+
+
+def test_samples_outside_the_image_carry_no_data():
+    """a polar sample off the image gets a NaN line from unwrap and an all-zero row in A, so it constrains
+    nothing (it used to be read as 0 and fitted as black); samples inside keep their rows"""
+    dt = T_EXP / 40
+    t = (np.arange(40) + 0.5) * dt
+    scene = F.grid((100.0, 63.5), np.arange(R0, R1 + 1.0), START - HALF, START + HALF, 1 / R1, SHAPE, 0, t, dt, OMEGA)
+    lines = F.unwrap(scene, np.ones(SHAPE))[1]
+    off = np.isnan(lines).ravel()
+    assert off.any() and not off.all()
+    A, _ = F.forward_model(scene, F.light(t, CODE, CHIP), T_EXP, lines)
+    rows = np.asarray(abs(A).sum(1)).ravel()
+    assert np.all(rows[off] == 0) and np.all(rows[~off] > 0)
+
+
+def test_dpir_deblur_does_not_depend_on_brightness():
+    """the same noisy capture at 0.15x brightness deblurs to the same image, scaled: raw levels vary with
+    gain and exposure, and DRUNet is not scale-invariant (dpir scales the data to its range)"""
+    img, truth = simulate()
+    noisy = F.sensor(img, 0.5 * 10000 / 0.8, np.random.default_rng(0))
+    rpm = OMEGA * 60 / (2 * np.pi)
+    a = capture.deblur(noisy, calib(), CODE, CHIP, T_EXP, rpm, "global", "dpir")[0]
+    b = capture.deblur(0.15 * noisy, calib(), CODE, CHIP, T_EXP, rpm, "global", "dpir")[0] / 0.15
+    assert blade_psnr(a, truth) > 25
+    assert abs(blade_psnr(a, truth) - blade_psnr(b, truth)) < 0.01
+
+
+def test_blade_noise_reads_the_blade_not_the_dark_background():
+    """shot noise makes the blade noisier than the background; blade_noise must read the blade's, where
+    a whole-image estimate (what DPIR's noise level used to come from) reads the background's"""
+    from skimage.restoration import estimate_sigma
+    clean = np.zeros((200, 200))
+    clean[50:150, 50:150] = 0.8
+    img = clean + np.random.default_rng(0).normal(0, 1, clean.shape) * np.where(clean > 0, 0.02, 0.002)
+    assert abs(F.blade_noise(img, np.ones(clean.shape, bool)) / 0.02 - 1) < 0.1
+    assert estimate_sigma(img) < 0.5 * 0.02
+    few = np.zeros(clean.shape, bool)
+    few[60:70, 60:70] = True                                   # 25 blocks: too few to trust
+    assert F.blade_noise(img, few) is None
+
+
+def test_compare_refuses_a_reference_of_another_size():
+    """a reference still in another camera mode used to score NaN without a word"""
+    with pytest.raises(SystemExit, match="same camera mode"):
+        capture.compare(np.zeros((128, 128)), None, np.zeros((64, 64)))

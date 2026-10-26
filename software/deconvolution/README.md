@@ -15,7 +15,10 @@ By hand, in this folder: `uv sync`, then `uv run python check.py`.
 **The rig**
 - Cover the front of the white stand in matte black. Anything bright behind the blades ruins the deblur.
 - Tape a white card with letters (5 to 8 mm tall, different on each blade) to each blade.
-- Dark room. Camera about 33 cm away, fan filling the picture.
+- Dark room. Camera about 33 cm away, fan as large as possible but **all of it inside the picture**
+  (anything past the edge carries no data).
+- Optional, once: a small white dot (about 3 mm) near the tip of one blade, for one coded capture. Its
+  streak shows the real light pattern (monitor lag and timing). Send it to Krish.
 
 **The fan** (Arduino IDE > Serial Monitor, 9600 baud, Newline; wait for the help text)
 - `s 200` turn 200 steps (do once first, to take up slack in the gears)
@@ -25,7 +28,11 @@ By hand, in this folder: `uv sync`, then `uv run python check.py`.
 **The shots** (camera GUI, same gain for everything, touch nothing in between)
 1. Fan stopped: Capture DNG, `s 400`, Capture DNG, `s 400`, Capture DNG. These are the 3 stills.
 2. Fan stopped: one more Capture DNG. This is the reference.
-3. Fan spinning: Coded Capture with `code_16bit_4refresh.json`. Note the rpm.
+3. Fan spinning: Coded Capture with `code_16bit_best_4refresh.json`. Note the rpm. Start at 3 rpm.
+   (It replaces `code_16bit_4refresh.json`, whose blur loses some detail outright. Same timing; 8 bits on instead of 9.)
+
+Rolling shutter camera: set **Padding to 0.25 s** in Coded Capture, and take its reference still in the
+same full-resolution mode as the coded captures (a different size cannot be scored).
 
 **Deblur** (VS Code: Run Task > **4. Open a deblur terminal**)
 

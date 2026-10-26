@@ -209,7 +209,7 @@ def align(ref, x, hub, r, th):
     a, b, c = corr[s - 1], corr[s], corr[(s + 1) % len(corr)]
     d = a - 2 * b + c
     shift = (s + (0.5 * (a - c) / d if d < 0 else 0.0)) * dth
-    turned = F.cartesian(F.polar(ref, hub, r, th + shift)[0], hub, r, th, x.shape)
+    turned = F.cartesian(F.polar(ref, hub, r, th + shift, F.INTERP)[0], hub, r, th, x.shape, F.INTERP)
     return turned, (shift + np.pi) % (2 * np.pi) - np.pi
 
 
