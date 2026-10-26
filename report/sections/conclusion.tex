@@ -1,0 +1,16 @@
+% Brief: summarise, and what we would do with another 2 months.
+\section{Conclusions and Future Work}
+\label{sec:conclusion}
+
+We built a coded illumination rig that turns an ordinary camera and monitor into a flutter shutter
+camera, and a pipeline that reverses the blur and recovers the speed of a spinning fan from a
+single photograph. In simulation the reconstruction reaches \psnrGsTex~dB on a textured blade, per-row
+rolling shutter matches the global shutter to within \rowsMaxMeanGapA~dB on average, and the speed is recovered to
+within \speedErrTex\%. On the rig, the monitor shows the code to within \SI{1}{ms} for
+\realWithinOneMs~of \realBits~bits. \TODO{Rig results against each success criterion.}
+
+With two more months we would replace the monitor with an LED, whose microsecond switching would
+allow codes hundreds of bits long; design codes for the rolling shutter, so that its row timing adds
+information instead of being corrected for; drive the motor continuously and measure its speed
+independently; and move from a fan to everyday moving scenes, where the motion must be estimated
+for every object.

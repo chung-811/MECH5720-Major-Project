@@ -1,0 +1,184 @@
+% Brief: qualitative results (including limitations) AND quantitative results compared against
+% conventional/alternative approaches. At least one plot with axes, units and uncertainty.
+% Pitch: every metric is mean +/- std over >= 10 captures per speed.
+%
+% Status: 5.1 is measured on the rig; 5.2 is simulation (pipeline validation, clearly labelled);
+% 5.3 holds the placeholders for the rig results against the three success criteria.
+\section{Results}
+\label{sec:results}
+
+\subsection{The code and the monitor}
+\label{sec:results-code}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{code_spectrum}
+  \caption{(a) The monitor's brightness during one exposure for our rig's code, steady light, and
+  the 52-bit code of Raskar et al.~\cite{raskar2006coded}. (b) The magnitude of each blur's spectrum
+  (zero-padded DFT, 1 at zero frequency). Steady light has exact zeros, where detail is lost. So does
+  our current \rigBits-bit rig code, at multiples of $1/9$ cycle per bit; the 52-bit code never falls
+  below \raskarMinMTF.}
+  \label{fig:code}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{real_cd}
+  \caption{First captures on the rig. (a) A hand-spun CD under coded light (global shutter, processed
+  image). The speed varied during the exposure, so these captures cannot be deblurred.
+  (b) How late each bit of the code was shown over all \realRuns~coded captures, from the display
+  software's log: \realWithinOneMs~of \realBits~bits within \SI{1}{ms}, the worst \realMaxLateMs~ms
+  (\realMaxLatePct\% of a bit), always bit \realLateBits.}
+  \label{fig:real}
+\end{figure}
+
+The light a code lets through is fixed before any capture, and \cref{fig:code} compares the codes.
+Steady light has exact spectral zeros. The 52-bit code of~\cite{raskar2006coded} keeps every
+frequency above \raskarMinMTF~of its zero-frequency value. The \rigBits-bit code currently used on
+the rig also has exact zeros, at multiples of $1/9$ cycle per bit, so it loses some detail just as
+steady light does; \cref{sec:limitations} discusses the replacement.
+\TODO{Measured blur of a bright dot on a blade, overlaid on (a), once captured.}
+
+The monitor shows the code on time. Over \realRuns~captures, \realWithinOneMs~of \realBits~bits
+appeared within \SI{1}{ms} of schedule (\cref{fig:real}b). The only late bit was the first switch to
+black, at most \realMaxLateMs~ms late, or \realMaxLatePct\% of a \realBitMs~ms bit. These times come
+from the display software, not an optical measurement. \TODO{Confirm with a photodiode or a
+high-frame-rate video of the monitor if time allows.}
+
+\subsection{Simulation: does the pipeline work?}
+\label{sec:results-sim}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{qualitative}
+  \caption{Simulated captures (top) and reconstructions (bottom) of the blade with a photograph and
+  letters, \SI{0.87}{s} exposure, rolling shutter read across the blade, PSNR against the stopped
+  blade. With coded light the global shutter (\psnrGsTex~dB) and per-row rolling shutter
+  (\psnrRsRowTex~dB) reconstructions are sharp; per frame loses a little (\psnrRsFrameTex~dB). Steady
+  light also deblurs well at this short blur; its spectral zeros matter as the blur grows
+  (\cref{tab:solvers}). The short exposure is sharp but noisy.}
+  \label{fig:qualitative}
+\end{figure*}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{rows_axis0}
+  \caption{Image quality by band of sensor lines (first to last read), simulation, readout down the
+  blade. Solid: global shutter (black) and per-row rolling shutter for three readout times;
+  dashed: per-frame. Averaged over the frame, per row is within \rowsMaxMeanGapA~dB of the global
+  shutter in every case; its worst single band is \rowsMaxGapA~dB short. Per frame
+  falls away from the middle band it was timed for, worst with the shortest code and longest readout
+  (mean \rowsShortFrameMeanA~dB, worst band \rowsShortFrameWorstA~dB, against \rowsShortRowMeanA~dB per
+  row). One noise draw per case.}
+  \label{fig:rows}
+\end{figure*}
+
+Simulation shows the pipeline works before any rig data exists (\cref{fig:qualitative}). On the
+harder scene, a photograph and letters on the blade, DPIR reconstructs the global shutter capture to
+\psnrGsTex~dB and the per-row rolling shutter capture to \psnrRsRowTex~dB, against \psnrRsFrameTex~dB
+per frame. The Tikhonov baseline reaches \tikGsTex~dB on the same capture. Steady light deblurred
+with the same solver gives \psnrConstTex~dB, and a short exposure \psnrShortTex~dB.
+
+\paragraph{Per row against per frame.}
+\Cref{fig:rows} tests the first success criterion, per row within \SI{1}{dB} of the global shutter
+in every band. Averaged over the frame it is met for every code and readout time: per row is within
+\rowsMaxMeanGapA~dB. Band by band it is narrowly missed, by up to \rowsMaxGapA~dB in the first bands
+read; with one noise draw per case, gaps of this size are close to the noise. Per frame degrades away from the band it was timed for, losing \rowsShortDropA~dB on average
+against the global shutter with a 15-bit code and the full sensor readout. With the readout across the blade instead, per row is within \rowsMaxMeanGapB~dB on average and
+\rowsMaxGapB~dB in its worst band.
+
+\paragraph{When does coding pay?}
+\Cref{tab:solvers} shows that coding the light pays when the blur is long. At 25~px of blur steady
+light deblurs nearly as well; at 101~px coded light gives \SI{36.3}{dB} against \SI{28.6}{dB}.
+A denoised short exposure matches coded light for reading letters at full resolution, so the gain is
+largest for fine texture and low light.
+
+\begin{table}[t]
+  \centering\small
+  \caption{Simulation, global shutter, PSNR (dB) over the blade. Top: solvers on the two scenes.
+  Bottom: coded light against steady light and a denoised short exposure as the blur (at the blade
+  tip) grows, DPIR, at full light and at a tenth of the light; a separate noise draw from the top half.}
+  \label{tab:solvers}
+  % Tikhonov and DPIR: demo.py via numbers.tex. TV row and the blur rows: STUDIES.md (coding_gain.py).
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{@{}lcc@{}}
+    \toprule
+    Solver & letters & photograph \\
+    \midrule
+    Tikhonov, best $\lambda$ & \tikGsLetters & \tikGsTex \\
+    Total variation, best $\lambda$ & 41.1 & 34.6 \\
+    DPIR, no tuning & \psnrGsLetters & \psnrGsTex \\
+    \midrule
+    Blur (coded/steady/short) & full light & a tenth \\
+    \midrule
+    25 px & 38.1 / 37.7 / 36.6 & 32.8 / 33.5 / 28.4 \\
+    51 px & 36.4 / 33.2 / 34.0 & 29.2 / 29.0 / 28.1 \\
+    101 px & 36.3 / 28.6 / 29.7 & 29.8 / 26.0 / 26.7 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{speed}
+  \caption{Speed from a single simulated capture: the reconstruction's data residual at candidate
+  speeds within $\pm20\%$ of the true speed, normalised to its minimum. The minimum lies within
+  \speedErrLetters\% (letters) and \speedErrTex\% (photograph) of the true speed. Far from the truth
+  the curve flattens, so the search needs a starting guess within 20\%.}
+  \label{fig:speed}
+\end{figure}
+
+\paragraph{Speed from the photograph.}
+The data residual has a clear minimum at the true speed (\cref{fig:speed}): the estimate is within
+\speedErrLetters\% and \speedErrTex\% on the two scenes, against the 5\% target.
+% STUDIES.md: 9 of 9 runs (3 speeds x 3 noise draws) within 0.26%.
+Across three speeds and three noise draws every estimate was within 0.26\%.
+
+\subsection{Rig results}
+\label{sec:results-rig}
+\TODO{The three success criteria on the real fan, mean $\pm$ std over 10 captures per speed. Re-use
+the simulation figures' layout so the two can be compared directly.}
+
+\begin{figure}[t]
+  \centering
+  \placeholder{Criterion 1 on the rig: PSNR (dB) by band of sensor lines, one line per method, error
+  bars = std over 10 captures.}
+  \caption{\TODO{Rig: image quality by band of sensor lines.}}
+  \label{fig:rig-rows}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \placeholder{Criterion 2: fraction of letters read (OCR) against speed (rpm) for coded+deblur,
+  steady+deblur, short exposure. Error bars.}
+  \caption{\TODO{Target: at least 90\% read with coded light where steady light gives under 50\%.}}
+  \label{fig:legibility}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \placeholder{Criterion 3: estimated against true speed (rpm), $y=x$ line and $\pm5\%$ band. Error
+  bars.}
+  \caption{\TODO{Target: within 5\%.}}
+  \label{fig:rig-speed}
+\end{figure}
+
+\begin{table}[t]
+  \centering\small
+  \caption{\TODO{Rig summary, mean $\pm$ std over 10 captures at \X~rpm.}}
+  \label{tab:summary}
+  \begin{tabular}{@{}lccc@{}}
+    \toprule
+    Method & PSNR (dB) & SSIM & Letters read \\
+    \midrule
+    Global shutter & \X & \X & \X \\
+    Rolling, per frame & \X & \X & \X \\
+    Rolling, per row & \X & \X & \X \\
+    Steady light + deblur & \X & \X & \X \\
+    Short exposure & \X & \X & \X \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\TODO{Rig criterion 1 (\cref{fig:rig-rows}), criterion 2 (\cref{fig:legibility}), criterion 3
+(\cref{fig:rig-speed}), summary (\cref{tab:summary}).}

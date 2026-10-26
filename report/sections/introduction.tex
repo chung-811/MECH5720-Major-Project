@@ -1,0 +1,46 @@
+% Brief: motivation (why anyone should care), principle of operation at a high level, what is new.
+% Journalistic style: the first sentence of each paragraph says what it is about.
+\section{Introduction}
+\label{sec:intro}
+
+\begin{figure}[b]
+  \centering
+  \includegraphics[width=\linewidth]{teaser}
+  \caption{Coded light makes motion blur reversible. Left: a simulated photograph of a fan blade
+  turning during one \SI{0.87}{s} exposure while the light flashes a 52-bit on/off code. Middle: our
+  reconstruction, \psnrGsTex~dB against the stopped blade (right).
+  \TODO{Replace with the same three panels from the rig once captured.}}
+  \label{fig:teaser}
+\end{figure}
+
+Photographing anything that moves forces a trade-off between blur and noise. A long exposure collects
+enough light but smears the subject; a short one freezes it but is dark and noisy. Inspection of
+rotating machinery, sport and traffic all sit on the wrong side of this trade-off.
+\TODO{One sentence on our application: reading markings on a spinning blade.}
+
+Ordinary motion blur cannot simply be undone. Under steady light a moving point traces a uniform
+streak, a box-shaped blur whose spectrum has exact zeros (\cref{fig:code}b). Detail at those
+frequencies is erased from the photograph, and no algorithm can recover it. If the light is instead
+switched on and off in a well-chosen binary code during the exposure, the blur keeps every
+frequency and becomes invertible~\cite{raskar2006coded}.
+
+We build such a system with \emph{coded illumination}: a monitor beside the camera flashes the code
+while the camera holds one long exposure, so the camera itself needs no modification
+(\cref{fig:system}). The subject is a fan with letters on its blades, driven by a stepper motor at a
+known speed. After unwrapping the image about the hub, the rotation becomes a simple shift and the
+blur becomes a known linear operator that we invert (\cref{fig:teaser}).
+
+What is new is a three-way comparison of how the camera's shutter interacts with the code. A global
+shutter exposes every row at once. A rolling shutter exposes row by row, so each row sees a slightly
+different part of the code; we reconstruct it either with one blur for the whole frame or with each
+row's own blur. We also estimate the fan's speed from the photograph alone.
+
+Our contributions are:
+\begin{itemize}
+  \item a coded illumination rig with a stepper-driven fan and two cameras, global and rolling
+        shutter (\cref{sec:method});
+  \item an open reconstruction and speed estimation pipeline with automatic calibration, in the
+        accompanying repository;
+  \item a measured comparison of the three methods against steady light and a short exposure
+        (\cref{sec:results}). \TODO{Headline rig number.}
+\end{itemize}

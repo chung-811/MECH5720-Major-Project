@@ -1,0 +1,72 @@
+% MECH5720 Major Project report: Flutter Shutter / Coded Illumination (Canvas Group 10)
+% Brief: two-column ICCP format, strict 6 pages + references, submitted as PDF with a repo link.
+%
+% PREAMBLE IS A STAND-IN. Replace everything between the two "=== preamble ===" lines with the
+% preamble from the official ICCP template (iccp2026_latex_template.zip on Canvas). The sections,
+% figures and refs.bib below do not depend on it.
+%
+% Build: tectonic main.tex   (or: latexmk -pdf main.tex)
+
+% === preamble (stand-in) ===
+\documentclass[10pt,twocolumn,letterpaper]{article}
+\usepackage[letterpaper,textwidth=6.875in,textheight=8.875in,columnsep=0.3125in,top=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{times}
+% === preamble (stand-in) ===
+
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage[capitalise]{cleveref}
+
+% Writing aids. Set \showtodostrue to \showtodosfalse before submitting: every TODO vanishes,
+% and every \placeholder figure still shows as a box, so nothing unfinished can slip through.
+\newif\ifshowtodos \showtodostrue
+\newcommand{\TODO}[1]{\ifshowtodos{\color{red}\textbf{[TODO:} #1\textbf{]}}\fi}
+\newcommand{\placeholder}[2][\linewidth]{%   \placeholder[width]{what goes here}
+  \fbox{\parbox[c][0.55#1][c]{\dimexpr#1-2\fboxsep-2\fboxrule}{\centering\small\color{gray}#2}}}
+\newcommand{\X}{\textcolor{red}{\textbf{XX}}}  % a number still to measure
+
+\graphicspath{{figures/}}
+% Let more floats share a page, so figures stay near their first mention instead of queueing
+% behind each other until after the references.
+\renewcommand{\topfraction}{0.9}\renewcommand{\dbltopfraction}{0.9}
+\renewcommand{\bottomfraction}{0.8}\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.8}\renewcommand{\dblfloatpagefraction}{0.8}
+\setcounter{topnumber}{3}\setcounter{bottomnumber}{2}\setcounter{totalnumber}{5}\setcounter{dbltopnumber}{2}
+% Every measured or simulated number in the text is a macro from this file, written by
+% figures/make_figures.py. A missing macro stops the build, so a stale number cannot slip in.
+\input{figures/numbers}
+
+\title{\TODO{title} Coded Illumination for Motion Deblurring:\\
+  Global Shutter versus Rolling Shutter}
+
+\author{%
+  Jack Thompson \quad Oliver Turner \quad Krish Singh \quad Daniel Chung \quad Ben Ritchie\\
+  The University of Sydney\\
+  {\small Code and data: \url{https://github.com/TODO/mech5720-2026-TODO}}
+}
+
+\date{}
+\begin{document}
+\maketitle
+
+% Page budget (6 pages, references not counted). Rough guide:
+%   abstract + intro 0.75 | literature 0.4 | method 1.6 | results 2.3 | limitations 0.5 | conclusion 0.3
+\input{sections/abstract}
+\input{sections/introduction}
+\input{sections/literature}
+\input{sections/method}
+\input{sections/results}
+\input{sections/limitations}
+\input{sections/conclusion}
+
+{\small
+\bibliographystyle{ieeetr}  % swap for the template's style
+\bibliography{refs}
+}
+
+\end{document}

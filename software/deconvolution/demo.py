@@ -48,7 +48,7 @@ caps = {
     "GS constant": F.capture(scene, box, Tc, flux, rng, **NOISE),
     "GS short": F.capture(scene, box, chip, flux, rng, gain=16, **NOISE),
 }
-res, lams = {}, {}
+res, lams, tiks = {}, {}, {}
 print(f"{'method':24s} {'tikhonov (best lam)':>22s} {'DPIR (no tuning)':>18s}")
 for name, L, img, kw in [
     ("GS coded, per-frame", coded, caps["GS coded"], {}),
@@ -58,6 +58,7 @@ for name, L, img, kw in [
 ]:
     P, lines = F.unwrap(scene, img)
     tik, lams[name] = best(P, lines, L, Tc, **kw)
+    tiks[name] = F.score(scene, tik)
     res[name] = F.wrap(scene, F.dpir(*F.forward_model(scene, L, Tc, lines, **kw), P))
     p_dpir, ssim_dpir = F.score(scene, res[name])
     print(f"{name:24s} {F.score(scene, tik)[0]:8.2f} dB  lam {lams[name]:.0e} {p_dpir:10.2f} dB  SSIM {ssim_dpir:.3f}")
@@ -91,4 +92,11 @@ a.plot(omegas / om, sc, "o-"), a.axvline(1, color="k", lw=0.5)
 a.set_xlabel("candidate / true speed"), a.set_ylabel("DPIR data residual")
 plt.tight_layout()
 plt.savefig(out / "speed.png", dpi=90)
+# the numbers behind both figures, for report/figures/make_figures.py
+np.savez_compressed(out / f"demo_{Path(args.render).stem}.npz", names=np.array(list(panels)),
+                    panels=np.stack(list(panels.values())).astype(np.float16), vmax=scene.ref.max(),
+                    methods=np.array(list(res)), psnr_ssim=np.array([F.score(scene, v) for v in res.values()]),
+                    tik_methods=np.array(list(tiks)), tik_psnr_ssim=np.array(list(tiks.values())),
+                    bands=np.array([F.bands(scene, res[k]) for k in list(res)[:3]]),
+                    omegas=omegas / om, residual=np.asarray(sc), est=est / om, code=code, chip=chip, Tc=Tc)
 print(f"figures in {out}/")

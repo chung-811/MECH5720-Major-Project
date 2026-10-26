@@ -1,0 +1,15 @@
+% Brief: whole report, no jargon, avoid acronyms, NO citations, include specific key numbers.
+% Simulation numbers are in; rig numbers are TODO. Rewrite around the rig results once measured.
+\begin{abstract}
+Photographs of moving objects blur, and a shorter exposure trades the blur for darkness and noise.
+We built a camera system that avoids this trade-off without modifying the camera: a computer monitor
+beside it flashes a designed on/off pattern during one long exposure, which makes the blur
+reversible. A fan with letters on its blades, driven by a stepper motor at a known speed, is the
+subject. We compare a camera that exposes every row at once with one that exposes row by row,
+corrected either once per image or row by row. In simulation, our reconstruction recovers a textured
+blade to \psnrGsTex~dB against the stopped fan; correcting row by row matches the all-at-once camera
+to within \rowsMaxMeanGapA~dB on average over the image; and the fan's speed is recovered from a single
+photograph to within \speedErrTex\%. On the real rig, the monitor showed the pattern to within one
+millisecond for \realWithinOneMs~of \realBits~flashes. \TODO{Rig results: image quality, share of
+letters read against steady light, and speed accuracy, each with its uncertainty.}
+\end{abstract}

@@ -1,0 +1,58 @@
+% Brief: what didn't work and why, especially fundamental limits.
+\section{Limitations and Pitfalls}
+\label{sec:limitations}
+
+\begin{table}[t]
+  \centering\small
+  \caption{What goes wrong, simulated at the rig's scale: a three-blade fan with a text card on each
+  blade, global shutter, the rig's code, \SI{5}{rpm}, run through the same commands as the lab.
+  PSNR against the stopped fan over three captures.}
+  \label{tab:faults}
+  % Source: software/deconvolution/STUDIES.md, "Rig-scale stress test".
+  \begin{tabular}{@{}lc@{}}
+    \toprule
+    Case & PSNR (dB) \\
+    \midrule
+    Baseline & 32.9 to 33.4 \\
+    Fan at 10 / \SI{15}{rpm} & 29.6 to 30.2 / 22.4 \\
+    5\% room light & 30.9 to 31.2 \\
+    White stand behind the blades & 8.3 to 11.0 \\
+    One bit shown twice as long & 19.6 \\
+    Speed given with the wrong sign & 15.8 \\
+    \quad the same, with the direction check & 32.95 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{The subject must turn at a known, steady speed.}
+Our first captures used a CD spun by hand (\cref{fig:real}a). The speed changed during each
+exposure, so no single blur explained the image and none could be deblurred. This is why the rig
+uses a stepper motor. In simulation, a speed error of 1, 2 and 5\% costs 0.8, 2.7 and \SI{8.5}{dB};
+the stepper's nominal 4096 steps per revolution against the true 4076 alone makes the fan 0.5\%
+fast, which the speed search (\cref{sec:speed}) corrects. % STUDIES.md, fault costs
+\TODO{Measured speed ripple of the stepper, if any.}
+
+\paragraph{The background must be dark.}
+Anything bright behind the blades is blurred by the code too, and is not in the model. A white
+stand behind the fan drops the reconstruction to about \SI{10}{dB} (\cref{tab:faults}), so the rig
+uses a matte black backing in a dark room.
+
+\paragraph{The current rig code has spectral zeros.}
+The \rigBits-bit code on the rig loses detail at multiples of $1/9$ cycle per bit
+(\cref{fig:code}b), like steady light. DPIR's prior hides much of the loss in simulation, but the
+loss is fundamental. \TODO{Swap for a code without zeros (e.g.\ the 52-bit code, or a searched
+16-bit code) and state which one the rig results use.}
+
+\paragraph{Speed, light and timing.}
+Above about \SI{10}{rpm} the blades smear into each other and quality falls quickly
+(\cref{tab:faults}). The speed search needs a guess within 20\%, as the residual flattens far from
+the truth (\cref{fig:speed}). A dropped or repeated bit costs about \SI{6}{dB} at blade scale, and the
+monitor's first switch to black ran up to \realMaxLateMs~ms late (\cref{fig:real}b).
+% STUDIES.md, fault costs: one bit shown twice, the next skipped: -6.1 dB
+
+\paragraph{Cost.}
+Each reconstruction takes seconds and under \SI{1}{GB} at 10~px/mm, but memory grows roughly with
+the cube of the resolution, so very fine sampling is out of reach on a laptop.
+% STUDIES.md: 7 s and 0.8 GB at 10 px/mm, 44 s and 5.2 GB at 40 px/mm (2.8 rpm, 40-50 mm blades)
+
+\TODO{Anything else found in the lab.}
