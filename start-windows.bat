@@ -51,13 +51,29 @@ if /i "%CAM%"=="g" (set FOLDER=global) else if /i "%CAM%"=="r" (set FOLDER=rolli
 )
 
 echo Copying the %FOLDER% camera server to the Pi (%PI%). Password: mech5720
-tar -C software\data_capture -cf - %FOLDER% coded | ssh %SSH_OPTS% %PI% "chmod -R u+w ~/%FOLDER% ~/coded 2>/dev/null; tar -xf - -C ~ && chmod -R u+w ~/%FOLDER% ~/coded"
-if errorlevel 1 (set "MSG=could not reach the Pi: is it on, plugged into this computer by ethernet, and is %PI% right?" & goto :fail)
+rem OneDrive marks folders read-only, and tar carries that over, so the Pi's old copy is removed and a fresh one
+rem unpacked (the Pi keeps nothing of its own in these folders). The Pi's clock is often behind: hide those warnings.
+tar -cf - --exclude __pycache__ -C software\data_capture %FOLDER% coded | ssh %SSH_OPTS% %PI% "chmod -R u+w ~/%FOLDER% ~/coded 2>/dev/null; rm -rf ~/%FOLDER% ~/coded && tar -xf - -C ~ --warning=no-timestamp --warning=no-unknown-keyword && chmod -R u+w ~/%FOLDER% ~/coded"
+if errorlevel 255 (set "MSG=could not reach the Pi: is it on, plugged into this computer by ethernet, and is %PI% right?" & goto :fail)
+if errorlevel 1 (set "MSG=reached the Pi but could not replace ~/%FOLDER% and ~/coded there: see the lines above" & goto :fail)
+
+rem The tunnel needs port %PORT% free on this computer (an ssh -L window left open from the README steps holds it).
+netstat -an | findstr /r /c:":%PORT% .*LISTENING" >nul
+if not errorlevel 1 (set "MSG=port %PORT% is already in use on this computer: close any other ssh -L %PORT%:... window (or Pi camera server window) and run this again" & goto :fail)
 
 echo.
 echo Starting the camera server on the Pi in a NEW WINDOW: type the Pi password (mech5720) there.
 echo Leave that window open while you use the camera; closing it stops the server.
-start "Pi camera server" ssh %SSH_OPTS% -tt -o ExitOnForwardFailure=yes -L %PORT%:localhost:8000 %PI% "pkill -f '[s]tream.py'; sleep 1; cd ~/%FOLDER% && exec python3 stream.py"
+rem On the Pi: stop any server left from an earlier run (the pattern must start at the python path, or it would match
+rem this shell's own command line); use the first Python that has flask and picamera2 (the system one, or a venv
+rem in the home folder such as ~/mech5720 from the lab handout); and if the server stops (an error, or Ctrl+C),
+rem wait for Enter so the error can be read.
+set "STOP=pkill -f '^[^ ]*python3? .*stream[.]py'; sleep 1"
+set "FINDPY=for p in python3 ~/*/bin/python3; do $p -c 'import flask, picamera2' 2>/dev/null && break; p=; done"
+set "NOPY=echo '*** No Python on the Pi has flask and picamera2. On the Pi run: pip install flask --break-system-packages'"
+set "SERVER=cd ~/%FOLDER% && echo Using $p && $p stream.py"
+set "WAIT=echo; echo '*** The camera server stopped: see the lines above. Press Enter to close.'; read x"
+start "Pi camera server" ssh %SSH_OPTS% -tt -o ExitOnForwardFailure=yes -L %PORT%:localhost:8000 %PI% "%STOP%; %FINDPY%; if [ $p ]; then %SERVER%; else %NOPY%; fi; %WAIT%"
 
 echo Waiting for the camera (up to 2 minutes, while you type the password)...
 for /l %%i in (1,1,120) do (
