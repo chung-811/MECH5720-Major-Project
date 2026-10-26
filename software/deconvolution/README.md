@@ -12,44 +12,50 @@ By hand, in this folder: `uv sync`, then `uv run python check.py`.
 
 ## Lab day
 
-**The rig**
+**0. Latest code.** In VS Code, click the branch name (bottom left) and pick `krish/sim-deconv`, then
+pull (or `git checkout krish/sim-deconv && git pull`).
+
+**1. The rig**
 - Cover the front of the white stand in matte black. Anything bright behind the blades ruins the deblur.
 - Tape a white card with letters (5 to 8 mm tall, different on each blade) to each blade.
-- Dark room. Camera about 33 cm away, fan as large as possible but **all of it inside the picture**
-  (anything past the edge carries no data).
-- Optional, once: a small white dot (about 3 mm) near the tip of one blade, for one coded capture. Its
-  streak shows the real light pattern (monitor lag and timing). Send it to Krish.
+- Dark room. Camera about 33 cm away, fan as large as possible but **all of it inside the picture**.
 
-**The fan** (Arduino IDE > Serial Monitor, 9600 baud, Newline; wait for the help text)
-- `s 200` turn 200 steps (do once first, to take up slack in the gears)
-- `s 400` turn 400 steps
-- `v 5` set 5 rpm, then `r 5` spin 5 turns (about a minute)
+**2. The fan** (Arduino IDE > Serial Monitor, 9600 baud, Newline; wait for the help text)
+- `s 200` once first, to take up slack in the gears
+- `s 400` turns 400 steps (between stills)
+- `v 3` sets 3 rpm, then `r 5` spins 5 turns
 
-**The shots** (camera GUI, same gain for everything, touch nothing in between)
-1. Fan stopped: Capture DNG, `s 400`, Capture DNG, `s 400`, Capture DNG. These are the 3 stills.
-2. Fan stopped: one more Capture DNG. This is the reference.
-3. Fan spinning: Coded Capture with `code_16bit_best_4refresh.json`. Note the rpm. Start at 3 rpm.
-   (It replaces `code_16bit_4refresh.json`, whose blur loses some detail outright. Same timing; 8 bits on instead of 9.)
+**3. The shots.** Everything is a **Coded Capture** (camera GUI > Stream Settings > Coded Capture). Type the
+**Test folder** name and pick the **Code file** before each group. Same gain throughout, touch nothing else.
 
-Rolling shutter camera: set **Padding to 0.25 s** in Coded Capture, and take its reference still in the
-same full-resolution mode as the coded captures (a different size cannot be scored).
+| Test folder | Code file | Fan | Do |
+| --- | --- | --- | --- |
+| `gs_stills` | `flat_16bit_4refresh.json` | stopped | Run, `s 400`, Run, `s 400`, Run, then one more Run (the reference) |
+| `gs_3rpm` | `code_16bit_best_4refresh.json` | `v 3`, `r 5` | Run while it spins, up to 10 times |
+| `gs_5rpm`, `gs_8rpm`, ... | same | `v 5`, ... | same; the speed must be in the folder name |
+| `gs_3rpm_flat` | `flat_16bit_4refresh.json` | `v 3`, `r 5` | steady light, for comparison |
 
-**Deblur** (VS Code: Run Task > **4. Open a deblur terminal**)
+Rolling shutter camera: the same with `rs_stills`, `rs_3rpm`, ... and **Padding 0.25 s** in Coded Capture.
+
+**4. Deblur.** VS Code: Run Task > **4. Deblur a capture folder**, type `gs_3rpm`. Or in a terminal (task 5):
 
 ```
-uv run python calibrate.py auto gs.json STILL1.dng STILL2.dng STILL3.dng --steps 400 --steps-per-rev 4076
-uv run python global-shutter.py CAPTURE.dng --calib gs.json --rpm 5 --reference REF.dng
+uv run python deblur.py gs_3rpm
 ```
 
-Results are in `out/`. Good: readable letters, no warnings. Then take the full set: 10 captures each at
-3, 5, 8 and 10 rpm, plus the same with `flat_16bit_4refresh.json` (steady light) and with a short normal
-exposure. Then the rolling shutter camera (`rs.json`, `rolling-shutter-per-row.py` and
-`rolling-shutter-per-frame.py`). Copy `output/` somewhere safe before leaving.
+It calibrates from `gs_stills` (the first time), deblurs every capture in `gs_3rpm` and scores each one
+against the reference. Results: `out/gs_3rpm/`, one picture per capture (capture, deblurred, reference).
+Good: readable letters and no `***` lines. Add `--find-speed` to also estimate the speed.
+
+Optional, once: a small white dot (about 3 mm) near the tip of one blade, for one coded capture. Its streak
+shows the real light pattern (monitor lag and timing). Send it to Krish. Copy `output/` somewhere safe
+before leaving.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
+| `deblur.py FOLDER` | everything below in one go, for a Test folder from the camera GUI |
 | `calibrate.py auto CAL.json S1 S2 S3 --steps 400 --steps-per-rev 4076` | finds the fan centre and blade size from the 3 stills |
 | `global-shutter.py CAPTURES --calib gs.json --rpm 5` | deblurs, global shutter |
 | `rolling-shutter-per-row.py CAPTURES --calib rs.json --rpm 5` | deblurs, rolling shutter, each row its own timing |
@@ -68,6 +74,8 @@ All commands start with `uv run python`. `-h` on any of them lists every option.
 | You see | Do this |
 | --- | --- |
 | `NOT READY` | do what the line says |
+| `no stills folder` | take the stills first (`gs_stills` or `rs_stills`, step 3) |
+| `give the speed` | put it in the folder name (`gs_3rpm`) or add `--rpm 3` |
 | `could not reach the Pi` | check the ethernet cable or hotspot; or use the Pi's IP: `PI=pi@IP ./start-mac.command` |
 | `the pairs disagree` | something moved between the stills: take them again |
 | `poor fit` | wrong steps: with Ben's sketch it is `--steps 400 --steps-per-rev 4076` |
@@ -82,6 +90,7 @@ All commands start with `uv run python`. `-h` on any of them lists every option.
 | File | What |
 | --- | --- |
 | `check.py` | is this computer ready |
+| `deblur.py` | the one command for lab day |
 | `calibrate.py` | makes the calibration file for each camera |
 | `global-shutter.py`, `rolling-shutter-per-*.py` | the three deblur methods |
 | `capture.py`, `real.py`, `flutter.py` | the code behind them |

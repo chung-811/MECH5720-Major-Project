@@ -441,3 +441,27 @@ def test_compare_refuses_a_reference_of_another_size():
     """a reference still in another camera mode used to score NaN without a word"""
     with pytest.raises(SystemExit, match="same camera mode"):
         capture.compare(np.zeros((128, 128)), None, np.zeros((64, 64)))
+
+
+def test_deblur_py_one_command(tmp_path):
+    """deblur.py, as in the lab: a stills folder (3 stills turned the same steps apart, then a reference) and
+    a capture folder named with its speed. It calibrates, saves calib.json with the stills, deblurs and scores"""
+    here = Path(__file__).parents[1]
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    rng = np.random.default_rng(0)
+    still_dir, cap_dir = tmp_path / "gs_stills", tmp_path / f"gs_{OMEGA * 60 / (2 * np.pi):.4f}rpm"
+    still_dir.mkdir(), cap_dir.mkdir()
+    for i, a in enumerate((0.0, 0.3, 0.6, 0.0)):                 # 3 stills 0.3 rad apart, then the reference
+        np.save(still_dir / f"coded_gs_20260101_00000{i}.npy", blade(rows, cols, START + a) + rng.normal(0, 0.005, SHAPE))
+    img, truth = simulate()
+    np.save(cap_dir / "coded_gs_20260101_000100.npy", img + rng.normal(0, 0.002, SHAPE))
+    (cap_dir / "coded_gs_20260101_000100.json").write_text(json.dumps(dict(
+        code=dict(bits=[int(c) for c in CODE], bit_duration_s=CHIP), actual_exposure_us=T_EXP * 1e6, readout_s=0.0,
+        frame_boundary_monotonic_ns=0, t0_monotonic_ns=0, late_bits=0, aborted=False)))
+    out = subprocess.run([sys.executable, "deblur.py", str(cap_dir), "--stills", str(still_dir), "--steps", "1000",
+                          "--steps-per-rev", str(2 * np.pi / 0.3 * 1000), "--out", str(tmp_path / "out")],
+                         cwd=here, capture_output=True, text=True)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert (still_dir / "calib.json").exists() and "PSNR" in out.stdout   # calibrated, and scored on the reference
+    x = np.load(tmp_path / "out" / "coded_gs_20260101_000100_global.npy")
+    assert blade_psnr(x, truth) > blade_psnr(img, truth) + 10
