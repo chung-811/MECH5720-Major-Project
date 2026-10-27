@@ -9,12 +9,14 @@ The folders are the "Test folder" names typed into the camera GUI's Coded Captur
   gs_3rpm     fan spinning, code_16bit_best_4refresh.json. Any name with the speed in it ("5rpm").
 Stills are coded captures too (with steady light) so they are the same size and light as the real ones.
 
-It calibrates from <camera>_stills once (calib.json, saved in that folder), then runs the deblur for the
+It calibrates from <camera>_stills once (out/<camera>_stills/calib.json: capture folders are never written to,
+they can be read-only, e.g. synced by OneDrive), then runs the deblur for the
 camera (global shutter, or both rolling shutter methods) on every capture in the folder, scored against the
 reference. Results in out/<folder>/. It only calls calibrate.py and the deblur scripts, so everything they
 print (warnings included) shows here.
 """
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -50,7 +52,9 @@ def main():
     ap.add_argument("--rpm", type=float, help="fan speed (default: the number before 'rpm' in the folder name)")
     ap.add_argument("--stills", help="folder with the stills and reference (default: output/<camera>_stills)")
     ap.add_argument("--steps", type=float, default=400, help="motor steps between stills (default 400)")
-    ap.add_argument("--steps-per-rev", type=float, default=4076, help="half-steps per turn (Ben's sketch: 4076)")
+    ap.add_argument("--steps-per-rev", type=float, default=2038,
+                    help="motor steps per turn: 2038 in full-step, Ben's sketch's default (it says 2048, the gearbox "
+                         "really gives about 2038: that reproduced the rig's hub exactly); 4076 if it says half-step")
     ap.add_argument("--recalibrate", action="store_true", help="calibrate again even if calib.json exists")
     ap.add_argument("--find-speed", action="store_true", help="also estimate the speed from each capture")
     ap.add_argument("--solver", choices=("dpir", "tikhonov"), default="dpir")
@@ -87,8 +91,12 @@ def main():
     out = Path(args.out) if args.out else HERE / "out" / folder.name
     print(f"{len(caps)} {cam} capture(s) in {folder.name} at {rpm:g} rpm")
     print(f"stills: {', '.join(p.name for p in stills[:3])}; reference: {ref.name if ref else 'none (not scored)'}")
-    calib = still_dir / "calib.json"
-    if args.recalibrate or not calib.exists():
+    calib = (out.parent / still_dir.name) / "calib.json"     # next to the results, never in a capture folder
+    calib.parent.mkdir(parents=True, exist_ok=True)
+    old = calib.exists() and "static" not in json.loads(calib.read_text())
+    if old:
+        print("calibration: doing it again, the old one has no static scene (what never moves) to take out")
+    if args.recalibrate or not calib.exists() or old:
         run("calibrate.py", "auto", calib, *stills[:3], "--steps", args.steps, "--steps-per-rev", args.steps_per_rev,
             "--out", out)
     else:

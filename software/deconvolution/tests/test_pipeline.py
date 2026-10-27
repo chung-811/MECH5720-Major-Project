@@ -449,8 +449,9 @@ def test_deblur_py_one_command(tmp_path):
     here = Path(__file__).parents[1]
     rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
     rng = np.random.default_rng(0)
-    still_dir, cap_dir = tmp_path / "gs_stills", tmp_path / f"gs_{OMEGA * 60 / (2 * np.pi):.4f}rpm"
-    still_dir.mkdir(), cap_dir.mkdir()
+    data = tmp_path / "data"
+    still_dir, cap_dir = data / "gs_stills", data / f"gs_{OMEGA * 60 / (2 * np.pi):.4f}rpm"
+    still_dir.mkdir(parents=True), cap_dir.mkdir()
     for i, a in enumerate((0.0, 0.3, 0.6, 0.0)):                 # 3 stills 0.3 rad apart, then the reference
         np.save(still_dir / f"coded_gs_20260101_00000{i}.npy", blade(rows, cols, START + a) + rng.normal(0, 0.005, SHAPE))
     img, truth = simulate()
@@ -458,10 +459,37 @@ def test_deblur_py_one_command(tmp_path):
     (cap_dir / "coded_gs_20260101_000100.json").write_text(json.dumps(dict(
         code=dict(bits=[int(c) for c in CODE], bit_duration_s=CHIP), actual_exposure_us=T_EXP * 1e6, readout_s=0.0,
         frame_boundary_monotonic_ns=0, t0_monotonic_ns=0, late_bits=0, aborted=False)))
-    out = subprocess.run([sys.executable, "deblur.py", str(cap_dir), "--stills", str(still_dir), "--steps", "1000",
-                          "--steps-per-rev", str(2 * np.pi / 0.3 * 1000), "--out", str(tmp_path / "out")],
-                         cwd=here, capture_output=True, text=True)
+    for d in (still_dir, cap_dir):
+        d.chmod(0o555)                                           # read-only, as OneDrive leaves them
+    try:
+        out = subprocess.run([sys.executable, "deblur.py", str(cap_dir), "--stills", str(still_dir), "--steps", "1000",
+                              "--steps-per-rev", str(2 * np.pi / 0.3 * 1000), "--out", str(tmp_path / "results" / "run")],
+                             cwd=here, capture_output=True, text=True)
+    finally:
+        for d in (still_dir, cap_dir):
+            d.chmod(0o755)
     assert out.returncode == 0, out.stdout + out.stderr
-    assert (still_dir / "calib.json").exists() and "PSNR" in out.stdout   # calibrated, and scored on the reference
-    x = np.load(tmp_path / "out" / "coded_gs_20260101_000100_global.npy")
+    calib = tmp_path / "results" / "gs_stills" / "calib.json"        # next to the results, not in the capture folder
+    assert calib.exists() and "PSNR" in out.stdout                   # calibrated, and scored on the reference
+    assert json.loads(calib.read_text())["static"] == "calib_static.npy"
+    assert "static scene taken out" in out.stdout
+    x = np.load(tmp_path / "results" / "run" / "coded_gs_20260101_000100_global.npy")
     assert blade_psnr(x, truth) > blade_psnr(img, truth) + 10
+
+
+def test_remove_static_leaves_only_what_moves():
+    """the static scene is fitted on the pixels outside the blade circle and taken out: under half the light a
+    fixed object is half as bright, inside the circle too, and only the moving part is left"""
+    static = np.full(SHAPE, 0.05)
+    static[5:20, 90:120] = 0.6                                 # a bright fixed object outside the circle
+    static[60:70, 30:40] = 0.4                                 # and one inside it, like the rig's bolts
+    moving = np.zeros(SHAPE)
+    moving[40:50, 60:70] = 0.3
+    img = 0.5 * static + 0.01 + moving + np.random.default_rng(0).normal(0, 0.001, SHAPE)
+    out, a, b = real.remove_static(img, static, HUB, 30)
+    assert abs(a - 0.5) < 0.01 and abs(b - 0.01) < 0.002
+    assert np.abs(out - moving).max() < 0.01
+    with pytest.raises(ValueError, match="fills the picture"):
+        real.remove_static(img, static, HUB, 200)
+    with pytest.raises(ValueError, match="calibrate from stills"):
+        real.remove_static(img, static[:-2], HUB, 30)

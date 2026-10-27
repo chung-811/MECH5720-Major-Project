@@ -271,6 +271,23 @@ def radii_from_stills(f0, f1, hub):
     return max(2.0, float(np.floor(np.percentile(rr, 1))) - 3), float(np.ceil(np.percentile(rr, 99.5))) + 3
 
 
+def remove_static(img, static, hub, r_out):
+    """(img with the static scene taken out, a, b). img ~ a * static + b is fitted on the pixels outside the
+    blade circle (radius r_out + 5 px), where nothing moves, and subtracted. static: the minimum of the stills
+    (calibrate.py auto saves it). On the rig's first 11 captures a was 0.46-0.51 under the coded light (8 of 16
+    bits on: the static scene at half brightness, as expected). Without this the arc finder locked onto glow
+    and wires instead of the blade and refused 4 of the 11; with it all 11 deblur and the arc follows the blade"""
+    if static.shape != img.shape:
+        raise ValueError(f"the static scene is {static.shape[1]} x {static.shape[0]} but the capture is "
+                         f"{img.shape[1]} x {img.shape[0]}: calibrate from stills taken the same way")
+    yy, xx = np.mgrid[:img.shape[0], :img.shape[1]]
+    out = np.hypot(yy - hub[0], xx - hub[1]) > r_out + 5
+    if out.sum() < 1000:
+        raise ValueError("the fan fills the picture, so there is nothing outside it to fit the static scene on")
+    a, b = np.linalg.lstsq(np.c_[static[out], np.ones(out.sum())], img[out], rcond=None)[0]
+    return img - (a * static + b), float(a), float(b)
+
+
 def find_arc(img, hub, r):
     """(a0, a1) deg, counter-clockwise from +col: the arc to deblur in one capture, the brightest blade
     and its smear. The capture's brightness around the hub over the outer half of rings r (nearer the

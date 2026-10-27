@@ -151,6 +151,15 @@ def main(method):
     calib = json.loads(Path(args.calib).read_text())
     dark = real.mean_frames(real.files(args.dark)) if args.dark else 0.0
     ref = real.load_dng(args.reference) - dark if args.reference else None
+    # what never moves (calibrate.py auto, 3+ stills): taken out of every capture and the reference, so the
+    # arc finder sees only the blades and the deblur only what turns (real.remove_static)
+    static = np.load(Path(args.calib).parent / calib["static"]) if calib.get("static") else None
+    if ref is not None and static is not None:
+        try:
+            ref = real.remove_static(ref, static, calib["hub"], calib["radius_px"][1])[0]
+        except ValueError as err:
+            raise SystemExit(f"reference: {err}")
+        print("scoring against the reference with the static scene taken out (the moving parts only)")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     scores, band_scores, speeds = [], [], []
@@ -158,6 +167,8 @@ def main(method):
         img = real.load_dng(path) - dark
         stem = out / f"{path.stem}_{method}"
         try:
+            if static is not None:
+                img, a_static, _ = real.remove_static(img, static, calib["hub"], calib["radius_px"][1])
             calib_here = for_capture(calib, img)
         except ValueError as err:
             print(f"{path.name}: skipped, {err}")
@@ -179,6 +190,11 @@ def main(method):
             print(f"{path.name}: skipped, the run was stopped early (ESC)")
             continue
         print(f"{path.name}: {len(code)} bits of {chip * 1e3:.1f} ms, exposure {t_exp:.3f} s, {method}, {args.solver}")
+        if static is not None:
+            print(f"  static scene taken out (here {a_static:.2f} x as bright as in the stills)")
+            if not 0.05 < a_static < 1.5:
+                print("  *** that does not look like the stills' scene: did the camera, the rig or the room light "
+                      "change? Retake the stills")
         if timing.get("late_bits"):
             print(f"  warning: {timing['late_bits']} bits were shown late (over 10 ms), expect a worse deblur")
         x, scene, rpm = deblur(img, calib_here, code, chip, t_exp, args.rpm, method, args.solver, args.lam, args.find_speed,

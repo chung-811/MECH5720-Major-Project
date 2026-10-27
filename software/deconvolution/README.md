@@ -21,7 +21,7 @@ pull (or `git checkout krish/sim-deconv && git pull`).
 - Dark room. Camera about 33 cm away, fan as large as possible but **all of it inside the picture**.
 
 **2. The fan** (Arduino IDE > Serial Monitor, 9600 baud, Newline; wait for the help text)
-- `s 200` once first, to take up slack in the gears
+- `s 200` once first, in the same direction as the stills, to take up slack in the gears
 - `s 400` turns 400 steps (between stills)
 - `v 3` sets 3 rpm, then `r 5` spins 5 turns
 
@@ -43,9 +43,12 @@ Rolling shutter camera: the same with `rs_stills`, `rs_3rpm`, ... and **Padding 
 uv run python deblur.py gs_3rpm
 ```
 
-It calibrates from `gs_stills` (the first time), deblurs every capture in `gs_3rpm` and scores each one
-against the reference. Results: `out/gs_3rpm/`, one picture per capture (capture, deblurred, reference).
-Good: readable letters and no `***` lines. Add `--find-speed` to also estimate the speed.
+It calibrates from `gs_stills` (the first time), takes out everything that never moves (found from the
+stills), deblurs every capture in `gs_3rpm` and scores each one against the reference. Results:
+`out/gs_3rpm/`, one picture per capture (capture, deblurred, reference). Good: readable letters and no `***`
+lines. Ben's motor turns clockwise in the picture, so name the folders `gs_-3rpm` (or it says "turns the
+other way" and fixes it itself). Don't use `--find-speed` for now: on the first real data it read 2.46 rpm
+for a fan really turning at about 3; the commanded speed is accurate.
 
 Optional, once: a small white dot (about 3 mm) near the tip of one blade, for one coded capture. Its streak
 shows the real light pattern (monitor lag and timing). Send it to Krish. Copy `output/` somewhere safe
@@ -56,14 +59,14 @@ before leaving.
 | Command | What it does |
 | --- | --- |
 | `deblur.py FOLDER` | everything below in one go, for a Test folder from the camera GUI |
-| `calibrate.py auto CAL.json S1 S2 S3 --steps 400 --steps-per-rev 4076` | finds the fan centre and blade size from the 3 stills |
+| `calibrate.py auto CAL.json S1 S2 S3 --steps 400 --steps-per-rev 2038` | finds the fan centre and blade size from the 3 stills |
 | `global-shutter.py CAPTURES --calib gs.json --rpm 5` | deblurs, global shutter |
 | `rolling-shutter-per-row.py CAPTURES --calib rs.json --rpm 5` | deblurs, rolling shutter, each row its own timing |
 | `rolling-shutter-per-frame.py CAPTURES --calib rs.json --rpm 5` | deblurs, rolling shutter, one timing for all rows |
 
 Add to a deblur command:
 - `--reference REF.dng` scores it against the still photo (PSNR, SSIM)
-- `--find-speed` works out the speed from the photo (needs `--rpm` within 20%)
+- `--find-speed` works out the speed from the photo (needs `--rpm` within 20%; not reliable on real data yet)
 - `--check` only draws the area it would deblur
 - `--solver tikhonov` faster, lower quality
 
@@ -78,8 +81,9 @@ All commands start with `uv run python`. `-h` on any of them lists every option.
 | `give the speed` | put it in the folder name (`gs_3rpm`) or add `--rpm 3` |
 | `could not reach the Pi` | check the ethernet cable or hotspot; or use the Pi's IP: `PI=pi@IP ./start-mac.command` |
 | `the pairs disagree` | something moved between the stills: take them again |
-| `poor fit` | wrong steps: with Ben's sketch it is `--steps 400 --steps-per-rev 4076` |
+| `poor fit` | wrong steps: Ben's sketch is full-step, `--steps 400 --steps-per-rev 2038` (4076 if it says half-step) |
 | `turns the other way` | the sign of `--rpm` was wrong; it fixed it. Flip the sign next time |
+| `does not look like the stills' scene` | the camera, rig or room light changed after the stills: retake them |
 | `edge of its search` | `--rpm` is more than 20% off the real speed |
 | `over 180` or `no dark gap` | the blades blur into each other: slow the fan, or check the stand is black |
 | blurry result, no warning | stand not black, fan over 10 rpm, or room light on |
