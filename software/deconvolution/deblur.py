@@ -93,9 +93,17 @@ def main():
     print(f"stills: {', '.join(p.name for p in stills[:3])}; reference: {ref.name if ref else 'none (not scored)'}")
     calib = (out.parent / still_dir.name) / "calib.json"     # next to the results, never in a capture folder
     calib.parent.mkdir(parents=True, exist_ok=True)
-    old = calib.exists() and "static" not in json.loads(calib.read_text())
+    old = None                                              # why a calibration from before is out of date
+    if calib.exists():
+        c = json.loads(calib.read_text())
+        m = c.get("monitor", {})
+        if "static" not in c:
+            old = "has no static scene (what never moves) to take out"
+        elif not ("rise" in m or "fall" in m or m.get("tau")):
+            old = (f"treats the monitor as switching instantly (it takes about {real.MONITOR['rise'] * 1e3:.0f} ms "
+                   f"to brighten)")
     if old:
-        print("calibration: doing it again, the old one has no static scene (what never moves) to take out")
+        print(f"calibration: doing it again, the old one {old}")
     if args.recalibrate or not calib.exists() or old:
         run("calibrate.py", "auto", calib, *stills[:3], "--steps", args.steps, "--steps-per-rev", args.steps_per_rev,
             "--out", out)

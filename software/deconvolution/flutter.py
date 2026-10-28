@@ -43,12 +43,18 @@ def light(t, code, chip=CHIP, black=0.0, t0=0.0):
     return black + (1 - black) * on
 
 
-def lcd(L, dt, tau):
-    """first-order lag of time constant tau on uniformly sampled brightness, a crude LCD response"""
-    out, a = np.empty_like(L), 1 - np.exp(-dt / tau)
-    out[0] = L[0]
-    for k in range(1, len(L)):
-        out[k] = out[k - 1] + a * (L[k] - out[k - 1])
+def lcd(L, dt, rise, fall=None, start=None):
+    """first-order lag on uniformly sampled brightness, a crude LCD response: time constant `rise` while it
+    brightens and `fall` (default: the same) while it dims, 0 = instant. start: what the screen showed
+    before the first sample (default L[0], no lag on it). Our monitor: real.MONITOR"""
+    fall = rise if fall is None else fall
+    up = 1 - np.exp(-dt / rise) if rise > 0 else 1.0
+    down = 1 - np.exp(-dt / fall) if fall > 0 else 1.0
+    out = np.empty(len(L))
+    prev = L[0] if start is None else start
+    for k, target in enumerate(L):
+        prev += (up if target > prev else down) * (target - prev)
+        out[k] = prev
     return out
 
 

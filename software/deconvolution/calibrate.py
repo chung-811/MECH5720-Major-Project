@@ -14,9 +14,11 @@ import real
 #                            "auto" (what `auto` writes): found in each capture, the brightest blade and its smear
 #   readout_s                first to last line, 0 for global shutter; measured by `readout`
 #   readout_axis             0 = sensor lines are image rows
-#   monitor {black, tau, t0} black level and LCD lag (s) from `monitor`; t0, when the code starts after the
-#                            (first line's) exposure opens, from `readout` on a rolling shutter. On a global
-#                            shutter t0 only turns the result, so the edge fit's value is kept
+#   monitor {black, rise, fall, t0}  black level, and how fast the screen brightens and dims (time constants,
+#                            s, 0 = instant): `auto` and `init` write real.MONITOR, measured on our monitor.
+#                            {black, tau, t0} instead (one lag both ways) when `monitor` fitted it. t0, when the
+#                            code starts after the (first line's) exposure opens, from `readout` on a rolling
+#                            shutter. On a global shutter t0 only turns the result, so the edge fit's value is kept
 
 
 def load(path):
@@ -84,11 +86,13 @@ def auto(a):
     if unexplained > 0.5:
         print("*** that is a poor fit: check the stills are of the same setup and the turn (--steps, --steps-per-rev)")
     old = load(a.calib) if Path(a.calib).exists() else {}
-    if old.get("monitor", {}).get("tau") or old.get("readout_s"):
-        print(f"kept the monitor and readout values already in {a.calib}")
+    m = old.get("monitor", {})
+    kept = [k for k, v in (("monitor", m.get("tau")), ("readout", old.get("readout_s"))) if v]
+    if kept:
+        print(f"kept the {' and '.join(kept)} values already in {a.calib}")
     calib = dict(hub=[round(hr, 2), round(hc, 2)], radius_px=[r0, r1], arc_deg="auto",
                  readout_s=old.get("readout_s", 0.0) if a.readout is None else a.readout, readout_axis=a.axis,
-                 monitor=old.get("monitor", dict(black=0.0, tau=0.0, t0=0.0)))
+                 monitor=m if m.get("tau") else {**real.MONITOR, "t0": m.get("t0", 0.0)})   # fitted by `monitor`: kept
     if len(frames) > 2:                            # the blades are somewhere else in each still, so the minimum
         static = Path(a.calib).with_name(Path(a.calib).stem + "_static.npy")     # is what never moves
         np.save(static, np.min(frames, 0))
@@ -134,7 +138,7 @@ def grid(a):
 
 def init(a):
     save(a.calib, dict(hub=a.hub, radius_px=a.radius, arc_deg=a.arc, readout_s=a.readout, readout_axis=a.axis,
-                       monitor=dict(black=0.0, tau=0.0, t0=0.0)))
+                       monitor=dict(real.MONITOR)))
 
 
 def hub(a):
@@ -179,7 +183,8 @@ def monitor(a):
         print(f"*** {'the lag is at the end of its search' if tau >= TAU_MAX else 'a black level that high is not a monitor'}"
               f": the fit is not measuring the monitor")
     if bad or implausible:
-        raise SystemExit("not saved: the calibration keeps its monitor values (the deblur works without this step)")
+        raise SystemExit("not saved: the calibration keeps its monitor values (real.MONITOR, measured on our monitor, "
+                         "fits it better than this step can)")
     for path in a.calib:
         c = load(path)
         c["monitor"] = dict(black=round(black, 4), tau=float(tau), t0=float(t0))
@@ -192,8 +197,9 @@ def readout(a):
     code, chip, t_exp = real.run_log(Path(a.coded).with_suffix(".json"))
     dark = real.mean_frames(real.files(a.dark)) if a.dark else 0.0
     m = c.get("monitor", {})
+    rise, fall = real.monitor_lag(m)
     ro, t0, rms, spread = real.fit_readout(real.load_dng(a.coded) - dark, real.load_dng(a.constant) - dark, code,
-                                           chip, t_exp, c["readout_axis"], m.get("black", 0.0), m.get("tau", 0.0))
+                                           chip, t_exp, c["readout_axis"], m.get("black", 0.0), rise, fall)
     print(f"readout {ro * 1e3:.2f} ms first to last line, code starts {t0 * 1e3:+.2f} ms after the first line opens, "
           f"fit rms {rms:.4f}, ratio spread over lines {spread:.3f}")
     if spread < 0.01:
@@ -209,9 +215,10 @@ def readout(a):
     save(a.calib, c)
 
 
-ap = argparse.ArgumentParser(description="write and fill one calibration json per camera. Quick: auto, then "
-                             "monitor. By hand: grid, init, check it with --check on a capture, hub, monitor. "
-                             "readout only for rolling shutter captures not padded past the readout")
+ap = argparse.ArgumentParser(description="write and fill one calibration json per camera. Quick: auto. By hand: "
+                             "grid, init, check it with --check on a capture, hub. readout only for rolling shutter "
+                             "captures not padded past the readout. monitor fits one lag both ways: not for our "
+                             "monitor, which real.MONITOR fits better")
 sub = ap.add_subparsers(required=True)
 p = sub.add_parser("auto", help="whole calibration from stills of the stopped fan, turned between them")
 p.add_argument("calib")

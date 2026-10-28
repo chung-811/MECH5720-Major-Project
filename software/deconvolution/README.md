@@ -50,9 +50,10 @@ lines. Ben's motor turns clockwise in the picture, so name the folders `gs_-3rpm
 other way" and fixes it itself). Don't use `--find-speed` for now: on the first real data it read 2.46 rpm
 for a fan really turning at about 3; the commanded speed is accurate.
 
-Optional, once: a small white dot (about 3 mm) near the tip of one blade, for one coded capture. Its streak
-shows the real light pattern (monitor lag and timing). Send it to Krish. Copy `output/` somewhere safe
-before leaving.
+The monitor's lag is built in: from the white dot captures (28 Oct), it takes about 44 ms to brighten and
+goes dark at once. Modelling that made every one of the 46 real captures sharper. `deblur.py` redoes a
+calibration from before it; the other scripts warn (`*** ... switching at once`). Copy `output/` somewhere
+safe before leaving.
 
 ## Commands
 
@@ -84,6 +85,7 @@ All commands start with `uv run python`. `-h` on any of them lists every option.
 | `poor fit` | wrong steps: Ben's sketch is full-step, `--steps 400 --steps-per-rev 2038` (4076 if it says half-step) |
 | `turns the other way` | the sign of `--rpm` was wrong; it fixed it. Flip the sign next time |
 | `does not look like the stills' scene` | the camera, rig or room light changed after the stills: retake them |
+| `switching at once` | an old calibration: run `deblur.py` (it redoes it) or `calibrate.py auto` again |
 | `edge of its search` | `--rpm` is more than 20% off the real speed |
 | `over 180` or `no dark gap` | the blades blur into each other: slow the fan, or check the stand is black |
 | blurry result, no warning | stand not black, fan over 10 rpm, or room light on |
@@ -106,7 +108,7 @@ All commands start with `uv run python`. `-h` on any of them lists every option.
 
 - Calibrate by hand if `auto` fails: `calibrate.py grid CAP.dng` (picture with a pixel grid), read the
   centre, radii and angles off it, then `calibrate.py init CAL.json --hub ROW COL --radius R0 R1 --arc A0 A1`.
-- `calibrate.py monitor` measures the monitor's black level and lag. Only works on blades wider than
-  their blur; the deblur is fine without it.
+- `calibrate.py monitor` fits one lag for brightening and dimming from a wide plain blade. Not for our
+  monitor, which brightens slowly but dims at once: the built-in values (`MONITOR` in `real.py`) fit it better.
 - `calibrate.py readout` measures rolling shutter timing. Not needed with the camera GUI, which already
   makes every row see the whole code (so per-row and per-frame come out the same).

@@ -42,9 +42,16 @@ def brightness(scene, code, chip, t_exp, monitor, t0=None):
     """monitor brightness at the sub-frames: the code through the calibrated black level, timing and LCD
     lag, scaled so a still pixel deblurs to its own value in a still capture of the same exposure.
     t0 overrides the calibrated code start"""
-    L = F.light(scene.t, code, chip, monitor.get("black", 0.0), monitor.get("t0", 0.0) if t0 is None else t0)
-    if monitor.get("tau"):
-        L = F.lcd(L, scene.dt, monitor["tau"])
+    black = monitor.get("black", 0.0)
+    t0 = monitor.get("t0", 0.0) if t0 is None else t0
+    rise, fall = real.monitor_lag(monitor)
+    # the lag runs from black (the screen shows black for the code's pre-roll), from the code's start: a code
+    # that starts before the first sub-frame (t0 < 0) has been brightening the screen for that long already
+    n = int(np.ceil(max(0.0, scene.t[0] - t0) / scene.dt)) if rise or fall else 0
+    t = np.r_[scene.t[0] - scene.dt * np.arange(n, 0, -1), scene.t]
+    L = F.light(t, code, chip, black, t0)
+    if rise or fall:
+        L = F.lcd(L, scene.dt, rise, fall, start=black)[n:]
     return L / F.weights(scene.t, scene.dt, L, t_exp, [0.0]).sum()
 
 
@@ -149,6 +156,10 @@ def main(method):
         ap.error("--rpm must not be 0")
 
     calib = json.loads(Path(args.calib).read_text())
+    if real.monitor_lag(calib.get("monitor", {})) == (0.0, 0.0):        # also refuses a malformed monitor
+        print(f"*** {args.calib} treats the monitor as switching at once, but ours takes about "
+              f"{real.MONITOR['rise'] * 1e3:.0f} ms to brighten: run calibrate.py auto again (deblur.py does it "
+              f"for you) for a sharper result")
     dark = real.mean_frames(real.files(args.dark)) if args.dark else 0.0
     ref = real.load_dng(args.reference) - dark if args.reference else None
     # what never moves (calibrate.py auto, 3+ stills): taken out of every capture and the reference, so the

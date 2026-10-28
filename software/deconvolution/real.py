@@ -157,13 +157,37 @@ def check_bits(L, t, code, chip, black, t0):
 READOUT_MAX, T0_MAX = 0.15, 0.1          # s, fit_readout's search: past either, the fit is not trusted
 
 
-def fit_readout(coded, constant, code, chip, t_exp, axis=0, black=0.0, tau=0.0):
+# Ollie's monitor, from a white dot on a blade (gs_dot, 28 Oct, code_16bit_best_4refresh, 3 rpm): it brightens
+# with a 44 ms time constant and goes dark at once, so a one-bit (67 ms) flash peaks at 78% of white. Deblurring
+# with it instead of an ideal screen was better on all 46 real captures (3, 5 and 8 rpm), 0.65 to 0.82 dB a set
+MONITOR = dict(black=0.0, rise=0.044, fall=0.0, t0=0.0)
+
+
+def monitor_lag(monitor):
+    """(rise, fall) time constants (s) of the calibration's monitor: `rise` and `fall` (calibrate.py auto writes
+    MONITOR's), each falling back to the one `tau` that calibrate.py monitor fits both ways"""
+    if not isinstance(monitor, dict):
+        raise SystemExit(f"the calibration's monitor is {monitor!r}: it must be {{black, rise, fall, t0}}")
+    tau = monitor.get("tau", 0.0)
+    given = monitor.get("rise", tau), monitor.get("fall", tau)
+    try:
+        rise, fall = map(float, given)
+    except (TypeError, ValueError):
+        rise = fall = float("nan")
+    if not (0 <= rise < 1 and 0 <= fall < 1):                    # also refuses nan
+        raise SystemExit(f"monitor rise {given[0]!r} and fall {given[1]!r} in the calibration: each must be 0 "
+                         f"(instant) or a time constant in seconds under 1")
+    return rise, fall
+
+
+def fit_readout(coded, constant, code, chip, t_exp, axis=0, black=0.0, tau=0.0, fall=None):
     """(readout_s, t0, rms, spread) for a rolling shutter: first to last line, and when the code starts after the
     first line opens. From a still scene shot once under the code and once under constant light (same
     exposure, gain, code length). Their ratio cancels the scene, leaving per line the share of light its
     window caught; line l opens at l readout / lines. Only measurable when lines catch the code differently
     (exposure shorter than code + readout + t0); otherwise per-row and per-frame are the same anyway.
-    spread: std / mean of the measured ratio over lines, about 0 when it is not measurable"""
+    spread: std / mean of the measured ratio over lines, about 0 when it is not measurable. black, tau, fall:
+    the monitor (F.lcd: tau while it brightens, fall while it dims, default tau, as monitor_lag gives them)"""
     n = coded.shape[axis]
     keep = constant > 0.1 * np.percentile(constant, 99)
     num = np.where(keep, coded, 0).sum(1 - axis)
@@ -172,7 +196,7 @@ def fit_readout(coded, constant, code, chip, t_exp, axis=0, black=0.0, tau=0.0):
     lines, ratio = np.arange(n)[ok], num[ok] / den[ok]
     dt = chip / 32
     t = np.arange(-0.3, t_exp + 0.6, dt)
-    cum = lambda L: np.r_[0, np.cumsum(F.lcd(L, dt, tau) if tau else L)] * dt
+    cum = lambda L: np.r_[0, np.cumsum(F.lcd(L, dt, tau, fall, start=black) if tau or fall else L)] * dt
     edges = np.r_[t - dt / 2, t[-1] + dt / 2]
     Cc, Cb = cum(F.light(t, code, chip, black)), cum(F.light(t, "1" * len(code), chip, black))
     share = lambda C, a, t0: np.interp(a + t_exp - t0, edges, C) - np.interp(a - t0, edges, C)
