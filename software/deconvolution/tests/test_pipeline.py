@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import capture
+import ocr
 import flutter as F
 import real
 
@@ -626,3 +627,142 @@ def test_scripts_warn_about_a_calibration_without_the_lag(tmp_path):
         out = subprocess.run([sys.executable, "global-shutter.py", tmp_path / "cap.npy", "--calib", c, "--rpm", "1",
                               "--check", "--out", tmp_path], cwd=here, capture_output=True, text=True, check=True)
         assert ("switching at once" in out.stdout) == warned
+
+
+def fan(rows, cols, angle, mark=True):
+    """three look-alike blades 120 deg apart (the rig's), told apart only by a dark patch near the tip of the
+    first, as the rig's are only by their letters"""
+    img = sum(blade(rows, cols, angle + k * 2 * np.pi / 3, texture=False) - 0.05 for k in range(3)) + 0.05
+    if mark:
+        a = angle
+        rr, cc = HUB[0] - 48 * np.sin(a), HUB[1] + 48 * np.cos(a)
+        img = np.where(np.hypot(rows - rr, cols - cc) < 5, 0.1, img)
+    return img
+
+
+def fan_capture(angle=START, omega=OMEGA, dt=CHIP / 40):
+    """the fan under the code, global shutter, as simulate()"""
+    t = (np.arange(int(np.ceil(T_EXP / dt))) + 0.5) * dt
+    L = F.light(t, CODE, CHIP)
+    L = L / F.weights(t, dt, L, T_EXP, [0.0]).sum()
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    w = F.weights(t, dt, L, T_EXP, [0.0])[0]
+    return sum(wk * fan(rows, cols, angle + omega * tk) for wk, tk in zip(w, t)), t, w
+
+
+def test_blade_angle_tells_look_alike_blades_apart():
+    """the whole capture, every blade, against the whole still blurred the same way: the marked blade lands
+    on the marked blade, not on a look-alike 120 deg off"""
+    img, t, w = fan_capture()
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    r = np.arange(R0, R1 + 1.0)
+    for turn in (2.0, -1.0):
+        ref = fan(rows, cols, START + turn)                         # the still, at another angle
+        angle, margin = real.blade_angle(ref, img, HUB, r, OMEGA, t, w)
+        off = (angle - turn + np.pi) % (2 * np.pi) - np.pi
+        assert abs(off) < np.radians(1.5) and margin > 1.02, (np.degrees(off), margin)
+
+
+def test_align_near_stays_on_that_blade():
+    """align, told roughly where the blade is, keeps to it even where a look-alike matches about as well"""
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    x, ref = fan(rows, cols, START, mark=False), fan(rows, cols, START + 1.0, mark=False)
+    r, th = np.arange(R0, R1 + 1.0), np.arange(START - 0.5, START + 0.5, 1 / R1)
+    for k in (0, 1, 2):                                             # each of the three look-alikes on request
+        want = 1.0 + k * 2 * np.pi / 3
+        got = real.align(ref, x, HUB, r, th, near=want + 0.05)[1]
+        assert abs((got - want + np.pi) % (2 * np.pi) - np.pi) < np.radians(1), (k, np.degrees(got))
+
+
+def test_speed_from_blur_finds_the_speed():
+    """the speed from the blur of the still, searched from guesses 15% off, within 0.5% of the true one
+    (nearest-step blur on bilinear samples read 1.2% low here). Only for these two still angles: on this
+    small blade, whose 1 px edges turn into a different pixel staircase at every angle, other angles move
+    the estimate by up to 9%. On the real captures (5, 8 rpm) the three stills agreed within 1.2%"""
+    img, _ = simulate()
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    rpm = OMEGA * 60 / (2 * np.pi)
+    for guess, turn in ((1.15, 1.0), (0.85, -2.0)):
+        ref = blade(rows, cols, START + turn)                       # the stopped blade, somewhere else
+        est, edge = capture.speed_from_blur(img, calib(), ref, CODE, CHIP, T_EXP, guess * rpm)
+        assert not edge and abs(est / rpm - 1) < 0.005, (guess, turn, est / rpm)
+
+
+@pytest.mark.skipif(subprocess.run(["which", "tesseract"], capture_output=True).returncode != 0,
+                    reason="tesseract not installed")
+def test_read_letter_reads_the_card():
+    """an upright letter on a card, with dark background and card edges round it, reads as that letter; a blank
+    card reads as nothing"""
+    from PIL import Image, ImageDraw, ImageFont
+    font = ImageFont.load_default(size=60)
+    for ch in "ABC":
+        im = Image.new("L", (85, 85), 10)                           # background
+        d = ImageDraw.Draw(im)
+        d.rectangle((8, 6, 80, 78), fill=230)                       # the card, cut by the square's edge
+        d.text((44, 42), ch, fill=20, font=font, anchor="mm")
+        assert ocr.read_letter(np.asarray(im, float) / 255) == ch
+    assert ocr.read_letter(np.full((85, 85), 0.9)) == ""
+
+
+def test_card_crop_turns_the_blade_to_point_down():
+    """a bright spot further out along the blade than the card's centre ends up straight below it"""
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    thc, rc = 0.7, 40.0
+    spot = np.hypot(rows - (HUB[0] - 52 * np.sin(thc)), cols - (HUB[1] + 52 * np.cos(thc))) < 2
+    c = ocr.card_crop(spot.astype(float), HUB, rc, thc, half=20)
+    r, k = np.unravel_index(np.argmax(c), c.shape)
+    assert abs(k - 20) <= 1 and r > 20 + 9, (r, k)
+
+
+@pytest.mark.parametrize("code,chip,sign", [(CODE, CHIP, -1), ("1", T_EXP, 1), ("1", T_EXP, -1)])
+def test_speed_from_blur_steady_light_and_either_way(code, chip, sign):
+    """steady light (one bit as long as the exposure: the sub-frames are then set by the speed, the case that
+    made the match jump between candidate speeds) and the fan turning either way: never off the search, the
+    parabola never more than a step, coded within 0.5%, steady within 3%"""
+    omega = sign * OMEGA
+    dt = CHIP / 40
+    t = (np.arange(int(np.ceil(T_EXP / dt))) + 0.5) * dt
+    L = F.light(t, code, chip)
+    w = F.weights(t, dt, L / F.weights(t, dt, L, T_EXP, [0.0]).sum(), T_EXP, [0.0])[0]
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    img = sum(wk * blade(rows, cols, START + omega * tk) for wk, tk in zip(w, t))
+    rpm = omega * 60 / (2 * np.pi)
+    est, edge = capture.speed_from_blur(img, calib(), blade(rows, cols, START + 1.0), code, chip, T_EXP, 1.1 * rpm)
+    assert not edge and abs(est / rpm - 1) < (0.005 if code == CODE else 0.03), est / rpm
+
+
+def test_steady_light_keeps_the_given_direction(capsys):
+    """steady light cannot show which way the fan turns, so the deblur never flips --rpm's sign on it"""
+    dt = CHIP / 40
+    t = (np.arange(int(np.ceil(T_EXP / dt))) + 0.5) * dt
+    L = F.light(t, "1", T_EXP)
+    w = F.weights(t, dt, L / F.weights(t, dt, L, T_EXP, [0.0]).sum(), T_EXP, [0.0])[0]
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    img = sum(wk * blade(rows, cols, START + OMEGA * tk) for wk, tk in zip(w, t))
+    rpm = OMEGA * 60 / (2 * np.pi)
+    for given in (rpm, -rpm):
+        used = capture.deblur(img, calib(), "1", T_EXP, T_EXP, given, "global", "tikhonov", 1e-3)[2]
+        assert np.sign(used) == np.sign(given)
+    assert "cannot be told" in capsys.readouterr().out
+
+
+def test_compare_with_the_capture_scores_the_right_blade(monkeypatch):
+    """compare given the capture scores the deblurred blade against the blade real.blade_angle names (which
+    tells look-alikes apart, test above), not whichever blade of the still best matches the deblur: here the
+    right one, then a look-alike it is told to use, which align on its own would not pick"""
+    img, t, w = fan_capture()
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    rpm = OMEGA * 60 / (2 * np.pi)
+    cal = {**calib(), "arc_deg": list(np.degrees([START - 0.6, START + 0.25 + OMEGA * T_EXP + 0.1]))}
+    x, scene, _ = capture.deblur(img, cal, CODE, CHIP, T_EXP, rpm, "global", "tikhonov", 1e-3)
+    for turn in (2.0, -1.0):
+        capture.compare(x, scene, fan(rows, cols, START + turn), img)
+        # the turned still against the fan with its mark on the capture's blade, and on each look-alike
+        err = [np.abs(scene.truth - fan(rows, cols, START + k * 2 * np.pi / 3))[scene.mask].mean() for k in (0, 1, 2)]
+        assert np.argmin(err) == 0 and err[0] < 0.5 * min(err[1:]), (turn, err)
+        assert scene.blade_margin > 1.02
+    turn = 2.0
+    monkeypatch.setattr(real, "blade_angle", lambda *a: (turn + 2 * np.pi / 3, 9.0))      # names a look-alike
+    capture.compare(x, scene, fan(rows, cols, START + turn), img)
+    err = [np.abs(scene.truth - fan(rows, cols, START + k * 2 * np.pi / 3))[scene.mask].mean() for k in (0, 1, 2)]
+    assert np.argmin(err) != 0 and scene.blade_margin == 9.0, err

@@ -213,12 +213,13 @@ def fit_readout(coded, constant, code, chip, t_exp, axis=0, black=0.0, tau=0.0, 
     return float(res.x[0]), float(res.x[1]), float(res.fun), float(ratio.std() / ratio.mean())
 
 
-def align(ref, x, hub, r, th):
+def align(ref, x, hub, r, th, near=None, within=np.radians(10)):
     """(reference turned to where the blade is in x, angle turned): a still of the stopped blade, rotated
     about the hub by the angle that best matches x over the rings r and angles th (circular
     cross-correlation of every ring, summed). Puts the ground truth where the deblurred blade is.
     Matched on the change along each ring, scaled to unit size per ring: edges and print, so uneven
-    light cannot pull it onto a brighter look-alike blade"""
+    light cannot pull it onto a brighter look-alike blade. near: only turns within `within` of this one
+    (blade_angle's), as the fan's blades look alike and one deblurred blade cannot always tell them apart"""
     dth = th[1] - th[0]
     full = th[0] + np.arange(int(np.ceil(2 * np.pi / dth))) * dth
     Px, Pr = F.polar(x, hub, r, th)[0], F.polar(ref, hub, r, full)[0]
@@ -229,12 +230,59 @@ def align(ref, x, hub, r, th):
     pad = np.zeros_like(Pr)
     pad[:, :Px.shape[1]] = Px
     corr = np.fft.irfft(np.conj(np.fft.rfft(pad)) * np.fft.rfft(Pr), Pr.shape[1]).sum(0)
-    s = int(np.argmax(corr))
+    if near is None:
+        s = int(np.argmax(corr))
+    else:
+        off = (np.arange(len(corr)) * dth - near + np.pi) % (2 * np.pi) - np.pi
+        s = int(np.argmax(np.where(np.abs(off) <= within, corr, -np.inf)))
     a, b, c = corr[s - 1], corr[s], corr[(s + 1) % len(corr)]
     d = a - 2 * b + c
     shift = (s + (0.5 * (a - c) / d if d < 0 else 0.0)) * dth
     turned = F.cartesian(F.polar(ref, hub, r, th + shift, F.INTERP)[0], hub, r, th, x.shape, F.INTERP)
     return turned, (shift + np.pi) % (2 * np.pi) - np.pi
+
+
+def ring_matcher(ref, img, hub, r):
+    """(match, step): match(omega, t, w) scores every turn of the reference's whole rings (every blade), blurred
+    by a motion omega under light w (light x seconds of each sub-frame t, F.weights for one line), against the
+    same rings of the capture, on edges scaled per ring as in align; entry s is the reference turned by
+    s * step. The rings are sampled once (cubic) at an angle step that divides the full turn exactly, and the
+    blur is shared linearly between its two nearest steps: nearest-step blur on bilinear samples read speeds
+    1.2% low in a noiseless simulation, this 0.1%"""
+    n = int(np.ceil(2 * np.pi * r[-1]))
+    dth = 2 * np.pi / n
+    full = np.arange(n) * dth
+
+    def edges(P):
+        D = np.diff(P, axis=1, append=P[:, :1])
+        return D / (np.linalg.norm(D, axis=1, keepdims=True) + 1e-12)
+    ref_f = np.fft.rfft(F.polar(ref, hub, r, full, F.INTERP)[0])
+    img_f = np.conj(np.fft.rfft(edges(F.polar(img, hub, r, full, F.INTERP)[0])))
+
+    def match(omega, t, w):
+        k = np.zeros(n)                                           # the blur along each ring
+        pos = omega * np.asarray(t) / dth
+        i = np.floor(pos).astype(int)
+        np.add.at(k, i % n, w * (1 - (pos - i)))
+        np.add.at(k, (i + 1) % n, w * (pos - i))
+        blurred = np.fft.irfft(ref_f * np.fft.rfft(k), n)
+        return np.fft.irfft(img_f * np.fft.rfft(edges(blurred)), n).sum(0)
+    return match, dth
+
+
+def blade_angle(ref, img, hub, r, omega, t, w):
+    """(turn, margin): the turn (rad, as align's) that puts the reference's blades where the capture's are at
+    t = 0 (ring_matcher), and how clearly: its match over the best one more than 10 deg away (nan when either
+    is not positive). All the blades vote at once, so it tells look-alike blades apart: the rig's differ only
+    in their letters, and on 35 coded captures of 28 Oct it picked the blade the deblur shows every time
+    (margins 1.7 to 3.0) where align alone picked a look-alike on 13. Steady light gives lower margins (about
+    1.4), and a scene with clutter and smaller letters (26 Oct) as low as 1.01: a margin near 1 is a guess"""
+    match, dth = ring_matcher(ref, img, hub, r)
+    corr = match(omega, t, w)
+    s = int(np.argmax(corr))
+    off = np.abs((np.arange(len(corr)) - s + len(corr) // 2) % len(corr) - len(corr) // 2) * dth
+    second = corr[off > np.radians(10)].max()
+    return float(s * dth), float(corr[s] / second) if corr[s] > 0 and second > 0 else float("nan")
 
 
 def turned_at(img, centre, angle, rows, cols):

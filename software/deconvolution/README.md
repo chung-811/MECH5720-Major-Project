@@ -100,6 +100,7 @@ All commands start with `uv run python`. `-h` on any of them lists every option.
 | `calibrate.py` | makes the calibration file for each camera |
 | `global-shutter.py`, `rolling-shutter-per-*.py` | the three deblur methods |
 | `capture.py`, `real.py`, `flutter.py` | the code behind them |
+| `rig_eval.py` | the report's rig numbers: PSNR, letters read (OCR, needs `brew install tesseract`) and speed from the blur, one CSV row per capture |
 | `tests/` | automatic checks: `uv run pytest` |
 | `blender/`, `demo.py`, `rows.py`, `legibility.py`, `coding_gain.py`, `robust.py` | simulation studies |
 | `STUDIES.md` | how it works, simulation results, what each fault costs |
