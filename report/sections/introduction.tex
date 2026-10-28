@@ -16,7 +16,8 @@
 Photographing anything that moves forces a trade-off between blur and noise. A long exposure collects
 enough light but smears the subject; a short one freezes it but is dark and noisy. Inspection of
 rotating machinery, sport and traffic all sit on the wrong side of this trade-off.
-\TODO{One sentence on our application: reading markings on a spinning blade.}
+Our test case is reading the letters on the blades of a spinning fan, as one would read a marking on a
+rotating part without stopping it.
 
 Ordinary motion blur cannot simply be undone. Under steady light a moving point traces a uniform
 streak, a box-shaped blur whose spectrum has exact zeros (\cref{fig:code}b). Detail at those
@@ -41,6 +42,7 @@ Our contributions are:
         shutter (\cref{sec:method});
   \item an open reconstruction and speed estimation pipeline with automatic calibration, in the
         accompanying repository;
-  \item a measured comparison of the three methods against steady light and a short exposure
-        (\cref{sec:results}). \TODO{Headline rig number.}
+  \item a measured comparison of the three methods against steady light on the rig, and a short
+        exposure in simulation (\cref{sec:results}): coded light deblurs \rigGapMin~to \rigGapMax~dB
+        better than steady light on the global shutter camera, at every speed.
 \end{itemize}

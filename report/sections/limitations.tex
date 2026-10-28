@@ -57,4 +57,12 @@ Each reconstruction takes seconds and under \SI{1}{GB} at 10~px/mm, but memory g
 the cube of the resolution, so very fine sampling is out of reach on a laptop.
 % STUDIES.md: 7 s and 0.8 GB at 10 px/mm, 44 s and 5.2 GB at 40 px/mm (2.8 rpm, 40-50 mm blades)
 
-\TODO{Anything else found in the lab.}
+\paragraph{Found in the lab.} The fan's three blades look alike, and matching the deblurred blade
+alone scored 13 of 35 captures against the wrong card; picking the blade from the whole capture fixed
+this (\cref{sec:calibration}), but where the letters are small next to the clutter (our first
+session) it is close to a guess. The padded rolling shutter exposure makes per row and per frame
+identical, so the rig cannot show per frame failing. On the rolling shutter, the measured monitor lag
+did not help: an ideal screen scored 0.15 to \SI{0.6}{dB} higher on three captures. The speed from the
+blur needs a still of the stopped fan, reads steady light 4 to 6\% low on the global shutter, and at
+\SI{3}{rpm} depends by up to 3.6\% on which still it is given. No short exposures were taken, so that
+baseline exists only in simulation.

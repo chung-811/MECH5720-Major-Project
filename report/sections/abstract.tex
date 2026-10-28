@@ -1,5 +1,4 @@
 % Brief: whole report, no jargon, avoid acronyms, NO citations, include specific key numbers.
-% Simulation numbers are in; rig numbers are TODO. Rewrite around the rig results once measured.
 \begin{abstract}
 Photographs of moving objects blur, and a shorter exposure trades the blur for darkness and noise.
 We built a camera system that avoids this trade-off without modifying the camera: a computer monitor
@@ -12,6 +11,10 @@ to within \rowsMaxMeanGapA~dB on average over the image; and the fan's speed is 
 photograph to within \speedErrTex\%. On the real rig, the monitor showed the pattern to within one
 millisecond for \realWithinOneMs~of \realBits~flashes, and with the all-at-once camera at 3 to 8
 revolutions per minute the reconstructions score \rigGapMin~to \rigGapMax~dB higher than steady light
-reconstructed the same way. \TODO{Row-by-row camera, share of letters read and speed accuracy on the
-rig, each with its uncertainty.}
+reconstructed the same way; the row-by-row camera, which images the fan larger, scores lower but keeps
+a \rigRsGapMin~to \rigRsGapMax~dB lead. At 8 revolutions per minute a character reader reads
+\rigReadCodedEight\% of the letters after reconstruction with coded light and \rigReadSteadyEight\%
+with steady light, and the speed measured from the blur is within 5\% of the set speed on
+\rigSpeedWithinCoded~of \rigSpeedAllCoded~and \rigSpeedWithinRsCoded~of \rigSpeedAllRsCoded~coded
+photographs from the two cameras.
 \end{abstract}

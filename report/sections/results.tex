@@ -134,58 +134,90 @@ Across three speeds and three noise draws every estimate was within 0.26\%.
 
 \subsection{Rig results}
 \label{sec:results-rig}
+Every capture was deblurred, none was skipped, and the direction check never flipped a sign. PSNR is
+against a still of the stopped fan with the static scene taken out of both (\cref{sec:calibration}),
+on the blade picked from the whole capture (margins of at least \rigMarginMin~and \rigRsMarginMin).
 With the global shutter camera, coded light deblurs to \rigCodedThree, \rigCodedFive~and
 \rigCodedEight~dB at 3, 5 and \SI{8}{rpm}, against \rigSteadyThree, \rigSteadyFive~and
 \rigSteadyEight~dB for steady light of the same length deblurred by the same solver: \rigGapMin~to
 \rigGapMax~dB better at every speed, by more than the spread between captures
-(\cref{fig:rig-psnr,tab:summary}). Every capture was deblurred, none skipped. An earlier session at
-\SI{3}{rpm}, with a different setup, gave \rigOctTwentySix~$\pm$~\rigOctTwentySixSd~dB over
-\rigOctTwentySixN~captures. PSNR is against a still of the stopped fan with the static scene taken
-out of both (\cref{sec:calibration}), so it scores the blades alone. \TODO{Rolling shutter
-(criterion 1), letters read (criterion 2) and speed from the photograph (criterion 3) on the rig.}
-
-\begin{figure}[t]
-  \centering
-  \placeholder{Criterion 1 on the rig: PSNR (dB) by band of sensor lines, one line per method, error
-  bars = std over 10 captures.}
-  \caption{\TODO{Rig: image quality by band of sensor lines.}}
-  \label{fig:rig-rows}
-\end{figure}
+(\cref{fig:rig-psnr,tab:summary}). The rolling shutter camera scores lower, \rigRsCodedThree,
+\rigRsCodedFive~and \rigRsCodedEight~dB, but coded light again leads steady light, by \rigRsGapMin~to
+\rigRsGapMax~dB. An earlier global shutter session at \SI{3}{rpm} gave \rigOctTwentySix~$\pm$
+\rigOctTwentySixSd~dB, but its blades could barely be told apart (margins down to
+\rigOctTwentySixMarginMin), so it is not used further.
 
 \begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{rig_psnr}
-  \caption{The rig, global shutter: PSNR of the deblurred blades against the stopped fan, coded light
-  and steady light of the same length, both deblurred with the same solver and monitor model. Bars:
-  mean $\pm$ std over \rigCodedThreeN, \rigCodedFiveN~and \rigCodedEightN~coded and 10 steady
-  captures; dots: each capture.}
+  \caption{The rig: PSNR of the deblurred blades against the stopped fan, coded and steady light of the
+  same length, both deblurred with the same solver and monitor model, on both cameras (rolling shutter
+  per row). Bars: mean $\pm$ std over 9 to 12 captures; dots: each capture.}
   \label{fig:rig-psnr}
 \end{figure}
 
+\paragraph{Criterion 1: per row against the global shutter.} On the rig, per row and per frame gave
+identical numbers on all 18 captures run both ways: the padded exposure lets every row see the whole
+code (\cref{fig:timing}b), so the per-frame loss of \cref{fig:rows} cannot occur. Band by band the
+rolling shutter camera is \rigBandGapMin~to \rigBandGapMax~dB below the global shutter camera
+(\rigBandGapMean~dB on average, \cref{fig:rig-rows}), so the \SI{1}{dB} target is missed on the rig.
+This compares two cameras, not two corrections: different sensors and lenses, and a blade 1.6 times
+larger in the frame, so the same motion smears it over 1.6 times as many pixels.
+
 \begin{figure}[t]
   \centering
-  \placeholder{Criterion 3: estimated against true speed (rpm), $y=x$ line and $\pm5\%$ band. Error
-  bars.}
-  \caption{\TODO{Target: within 5\%.}}
-  \label{fig:rig-speed}
+  \includegraphics[width=\linewidth]{rig_rows}
+  \caption{Criterion 1 on the rig, coded light, every speed: PSNR by band of sensor lines, first read
+  to last, mean $\pm$ std over the captures whose blade reached the band. Rolling shutter per row and per
+  frame give identical numbers here (padded exposure).}
+  \label{fig:rig-rows}
+\end{figure}
+
+\paragraph{Criterion 2: letters read.} The reference's card read as one of the fan's three letters in
+all \rigCardsAll~global and \rigRsCardsAll~rolling shutter captures, and no letter was read from any
+capture before deblurring. After deblurring, the global shutter camera read \rigReadCodedThree,
+\rigReadCodedFive~and \rigReadCodedEight\% of the letters with coded light at 3, 5 and \SI{8}{rpm},
+against \rigReadSteadyThree, \rigReadSteadyFive~and \rigReadSteadyEight\% with steady light
+(\cref{fig:rig-criteria}a). The target, at least 90\% with coded light where steady light gives under
+50\%, is met at \SI{8}{rpm}; at 3 and \SI{5}{rpm} steady light is still legible. The rolling shutter
+camera reads \rigReadRsCodedThree, \rigReadRsCodedFive~and \rigReadRsCodedEight\% with coded light,
+against \rigReadRsSteadyThree, \rigReadRsSteadyFive~and \rigReadRsSteadyEight\% with steady light:
+better at every speed, but short of 90\% at 5 and \SI{8}{rpm}.
+
+\paragraph{Criterion 3: speed from the blur.} With coded light the speed from the blur is within 5\% of
+the commanded speed on \rigSpeedWithinCoded~of \rigSpeedAllCoded~global and \rigSpeedWithinRsCoded~of
+\rigSpeedAllRsCoded~rolling shutter captures; the mean errors are \rigSpeedCodedThree,
+\rigSpeedCodedFive~and \rigSpeedCodedEight\% (global) and \rigSpeedRsCodedThree, \rigSpeedRsCodedFive~and
+\rigSpeedRsCodedEight\% (rolling) at 3, 5 and \SI{8}{rpm} (\cref{fig:rig-criteria}b). Steady light, whose
+blur is nearly a plain box, does worse: \rigSpeedWithinSteady~of \rigSpeedAllSteady~and
+\rigSpeedWithinRsSteady~of \rigSpeedAllRsSteady~within 5\%.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{rig_criteria}
+  \caption{The rig, both cameras (GS global, RS rolling shutter). (a) Criterion 2: letters read by OCR
+  after deblurring, against the same card on the still. (b) Criterion 3: speed from the blur against the
+  commanded speed, mean $\pm$ std; shaded: the $\pm5\%$ target.}
+  \label{fig:rig-criteria}
 \end{figure}
 
 \begin{table}[t]
   \centering\small
-  \caption{The rig, global shutter: PSNR (dB) of the deblurred blades, mean $\pm$ std over
-  \rigCodedThreeN, \rigCodedFiveN~and \rigCodedEightN~coded and 10 steady captures.
-  \TODO{Rolling shutter rows, short exposure, letters read.}}
+  \caption{The rig: PSNR (dB) of the deblurred blades, mean $\pm$ std over 9 to 12 captures; rolling
+  shutter per row (per frame identical).}
   \label{tab:summary}
   \begin{tabular}{@{}lccc@{}}
     \toprule
-    Light & \SI{3}{rpm} & \SI{5}{rpm} & \SI{8}{rpm} \\
+    Camera, light & \SI{3}{rpm} & \SI{5}{rpm} & \SI{8}{rpm} \\
     \midrule
-    Coded + deblur & \rigCodedThree~$\pm$~\rigCodedThreeSd & \rigCodedFive~$\pm$~\rigCodedFiveSd
+    Global, coded & \rigCodedThree~$\pm$~\rigCodedThreeSd & \rigCodedFive~$\pm$~\rigCodedFiveSd
       & \rigCodedEight~$\pm$~\rigCodedEightSd \\
-    Steady + deblur & \rigSteadyThree~$\pm$~\rigSteadyThreeSd & \rigSteadyFive~$\pm$~\rigSteadyFiveSd
+    Global, steady & \rigSteadyThree~$\pm$~\rigSteadyThreeSd & \rigSteadyFive~$\pm$~\rigSteadyFiveSd
       & \rigSteadyEight~$\pm$~\rigSteadyEightSd \\
+    Rolling, coded & \rigRsCodedThree~$\pm$~\rigRsCodedThreeSd & \rigRsCodedFive~$\pm$~\rigRsCodedFiveSd
+      & \rigRsCodedEight~$\pm$~\rigRsCodedEightSd \\
+    Rolling, steady & \rigRsSteadyThree~$\pm$~\rigRsSteadyThreeSd & \rigRsSteadyFive~$\pm$~\rigRsSteadyFiveSd
+      & \rigRsSteadyEight~$\pm$~\rigRsSteadyEightSd \\
     \bottomrule
   \end{tabular}
 \end{table}
-
-\TODO{Rig criterion 1 (\cref{fig:rig-rows}) and criterion 3 (\cref{fig:rig-speed}).}

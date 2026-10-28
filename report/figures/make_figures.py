@@ -7,7 +7,7 @@ number is typed by hand.
 Inputs:
   - code files: software/data_capture/coded/params/          (in the repo)
   - real captures and run logs: output/gs_cd, output/rs_cd   (Ollie's 21 Oct hand-spun CD session)
-  - rig scores: figures/data/rig_psnr.csv                    (deblur.py on the 26 and 28 Oct captures, in the repo)
+  - rig numbers: figures/data/rig.csv                       (software/deconvolution/rig_eval.py, in the repo)
   - simulation results: software/deconvolution/out/demo_*.npz and rows_*_axis*.npz, written by
         uv run python demo.py renders/blade.npz
         uv run python demo.py renders/blade_tex.npz
@@ -17,6 +17,7 @@ Inputs:
 
 A figure whose input is missing is skipped and listed at the end (exit code 1).
 """
+import csv
 import glob
 import json
 import sys
@@ -148,37 +149,158 @@ def fig_real():
 
 # ---------------------------------------------------------------- real rig: coded against steady light
 WORD = {3: "Three", 5: "Five", 8: "Eight"}
+CAMS = {"": ("global", "2026-10-28", "global shutter"),        # macro prefix: (method, session, name)
+        "Rs": ("rs-row", "2026-10-29", "rolling shutter")}     # padded: rs-frame gave the same numbers
+LETTERS = set("ABC")                                            # the fan's cards
+
+
+def rig_rows():
+    """data/rig.csv (software/deconvolution/rig_eval.py, one row per capture) as dicts, or None"""
+    path = HERE / "data/rig.csv"
+    if not need(path):
+        return None
+    with path.open() as f:
+        return list(csv.DictReader(l for l in f if not l.startswith("#")))
+
+
+def by_speed(rows, cam, light, key, date=None):
+    """{speed (rpm, unsigned): [key(row)]} for one camera and light, rows where key gives None left out"""
+    method, session, _ = CAMS[cam]
+    out = {}
+    for r in rows:
+        if r["method"] == method and r["date"] == (date or session) and r["light"] == light:
+            v = round(abs(float(r["rpm"])))
+            if v not in WORD:
+                print(f"  note: {r['capture']} at {v} rpm left out of the rig figures (only 3, 5, 8)")
+                continue
+            k = key(r)
+            if k is not None:
+                out.setdefault(v, []).append(k)
+    return dict(sorted(out.items()))
 
 
 def fig_rig():
-    """PSNR against speed on the rig (global shutter), coded and steady light, from data/rig_psnr.csv"""
-    path = HERE / "data/rig_psnr.csv"
-    if not need(path):
+    """PSNR against speed on the rig, both cameras, coded and steady light"""
+    rows = rig_rows()
+    if rows is None:
         return
-    rows = [l.split(",") for l in path.read_text().splitlines() if l and not l.startswith(("#", "date"))]
-    score = {}
-    for date, light, rpm, _, p, _ in rows:
-        score.setdefault((date, light, int(rpm)), []).append(float(p))
-    fig, a = plt.subplots(figsize=(COL, 1.7))
-    for light, col, mk, dx in (("coded", "C0", "o", -0.12), ("steady", "C3", "s", 0.12)):
-        rpms = sorted(r for d, l, r in score if d == "2026-10-28" and l == light)
-        for r in rpms:
-            p = np.array(score[("2026-10-28", light, r)])
-            a.scatter(np.full(p.size, r + dx) + np.linspace(-0.05, 0.05, p.size), p, s=3, color=col, alpha=0.35, lw=0)
-            num(f"rig{light.title()}{WORD[r]}", p.mean()), num(f"rig{light.title()}{WORD[r]}Sd", p.std())
-            num(f"rig{light.title()}{WORD[r]}N", p.size, "{}")
-        m = [np.mean(score[("2026-10-28", light, r)]) for r in rpms]
-        sd = [np.std(score[("2026-10-28", light, r)]) for r in rpms]
-        a.errorbar(np.array(rpms) + dx, m, sd, fmt=mk + "-", color=col, ms=3, capsize=2,
-                   label=f"{light} light + deblur")
-    gaps = [np.mean(score[("2026-10-28", "coded", r)]) - np.mean(score[("2026-10-28", "steady", r)])
-            for r in sorted(WORD) if ("2026-10-28", "steady", r) in score]
-    num("rigGapMin", min(gaps)), num("rigGapMax", max(gaps))
-    p26 = np.array(score[("2026-10-26", "coded", 3)])
-    num("rigOctTwentySix", p26.mean()), num("rigOctTwentySixSd", p26.std()), num("rigOctTwentySixN", p26.size, "{}")
+    fig, a = plt.subplots(figsize=(COL, 1.8))
+    style = {("", "coded"): ("C0", "o", -0.15), ("", "steady"): ("C3", "s", -0.05),
+             ("Rs", "coded"): ("C2", "^", 0.05), ("Rs", "steady"): ("C1", "v", 0.15)}
+    for cam in CAMS:
+        means = {}
+        for light in ("coded", "steady"):
+            col, mk, dx = style[(cam, light)]
+            s = by_speed(rows, cam, light, lambda r: float(r["psnr_db"]))
+            for v, p in s.items():
+                p = np.array(p)
+                a.scatter(np.full(p.size, v + dx) + np.linspace(-0.03, 0.03, p.size), p, s=2, color=col, alpha=0.3, lw=0)
+                num(f"rig{cam}{light.title()}{WORD[v]}", p.mean()), num(f"rig{cam}{light.title()}{WORD[v]}Sd", p.std())
+                num(f"rig{cam}{light.title()}{WORD[v]}N", p.size, "{}")
+            means[light] = {v: np.mean(p) for v, p in s.items()}
+            a.errorbar(np.array(list(s)) + dx, [np.mean(p) for p in s.values()], [np.std(p) for p in s.values()],
+                       fmt=mk + ("-" if light == "coded" else "--"), color=col, ms=3, capsize=2,
+                       label=f"{CAMS[cam][2]}, {light}")
+        gaps = [means["coded"][v] - means["steady"][v] for v in means["coded"] if v in means["steady"]]
+        margins = [float(r["blade_margin"]) for r in rows
+                   if r["method"] == CAMS[cam][0] and r["date"] == CAMS[cam][1]]
+        if not gaps or not margins:
+            missing.append(f"data/rig.csv: no coded and steady {CAMS[cam][2]} rows of the same speed")
+            continue
+        num(f"rig{cam}GapMin", min(gaps)), num(f"rig{cam}GapMax", max(gaps))
+        num(f"rig{cam}MarginMin", np.nanmin(margins)), num(f"rig{cam}Captures", len(margins), "{}")
+        num(f"rig{cam}Flipped", sum(r["flipped"] == "1" for r in rows if r["method"] == CAMS[cam][0]
+                                    and r["date"] == CAMS[cam][1]), "{}")
+    p26 = by_speed(rows, "", "coded", lambda r: (float(r["psnr_db"]), float(r["blade_margin"])), "2026-10-26")[3]
+    p, m = np.array(p26).T
+    num("rigOctTwentySix", p.mean()), num("rigOctTwentySixSd", p.std()), num("rigOctTwentySixN", p.size, "{}")
+    num("rigOctTwentySixMarginMin", np.nanmin(m))
     a.set_xticks(sorted(WORD)), a.set_xlabel("fan speed (rpm)"), a.set_ylabel("PSNR (dB)")
-    a.legend(frameon=False, fontsize=6), a.grid(alpha=0.3, lw=0.4)
+    a.legend(frameon=False, fontsize=5, ncol=2), a.grid(alpha=0.3, lw=0.4)
     save(fig, "rig_psnr")
+
+
+def fig_rig_rows():
+    """criterion 1 on the rig: PSNR by band of sensor lines, coded light, every speed, both cameras"""
+    rows = rig_rows()
+    if rows is None:
+        return
+    fig, a = plt.subplots(figsize=(COL, 1.6))
+    curve = {}
+    for cam, col, mk in (("", "C0", "o"), ("Rs", "C2", "^")):
+        b = np.array([v for s in by_speed(rows, cam, "coded", lambda r: [float(x) for x in r["bands_db"].split(";")]).values()
+                      for v in s])
+        if b.size == 0:
+            missing.append(f"data/rig.csv: no coded {CAMS[cam][2]} rows")
+            return
+        n = np.isfinite(b).sum(0)                                      # captures whose blade reached each band
+        mean = np.array([np.nanmean(b[:, k]) if n[k] else np.nan for k in range(b.shape[1])])
+        sd = np.array([np.nanstd(b[:, k]) if n[k] else np.nan for k in range(b.shape[1])])
+        curve[cam] = mean
+        x = (np.arange(b.shape[1]) + 0.5) / b.shape[1]
+        a.errorbar(x, mean, sd, fmt=mk + "-", color=col, ms=3, capsize=2,
+                   label=CAMS[cam][2] + (", per row (= per frame)" if cam else ""))
+        num(f"rig{cam}BandsUsed", int((n > 0).sum()), "{}")
+    gap = curve[""] - curve["Rs"]
+    num("rigBandGapMean", np.nanmean(gap)), num("rigBandGapMin", np.nanmin(gap)), num("rigBandGapMax", np.nanmax(gap))
+    a.set_xlabel("band of sensor lines (first read to last)"), a.set_ylabel("PSNR (dB)"), a.set_xlim(0, 1)
+    a.legend(frameon=False, fontsize=5.5), a.grid(alpha=0.3, lw=0.4)
+    save(fig, "rig_rows")
+
+
+def fig_rig_criteria():
+    """(a) letters read by OCR against speed, (b) speed from the blur against the commanded speed"""
+    rows = rig_rows()
+    if rows is None:
+        return
+    fig, (a, b) = plt.subplots(1, 2, figsize=(COL, 1.8))
+    style = {("", "coded"): ("C0", "o"), ("", "steady"): ("C3", "s"), ("Rs", "coded"): ("C2", "^"),
+             ("Rs", "steady"): ("C1", "v")}
+    for cam in CAMS:
+        session = [r for r in rows if r["method"] == CAMS[cam][0] and r["date"] == CAMS[cam][1]]
+        valid = [r for r in session if r["card"] in LETTERS]           # the still's card read as one of the fan's
+        num(f"rig{cam}CardsRead", len(valid), "{}"), num(f"rig{cam}CardsAll", len(session), "{}")
+        for light in ("coded", "steady"):
+            col, mk = style[(cam, light)]
+            s = by_speed(valid, cam, light, lambda r: r["read"] == r["card"])
+            a.plot(list(s), [100 * np.mean(v) for v in s.values()], mk + ("-" if light == "coded" else "--"),
+                   color=col, ms=3, label=f"{'GS' if not cam else 'RS'} {light}")
+            for v, ok in s.items():
+                num(f"rigRead{cam}{light.title()}{WORD[v]}", 100 * np.mean(ok), "{:.0f}")
+                num(f"rigRead{cam}{light.title()}{WORD[v]}N", len(ok), "{}")
+            raw = [x for v in by_speed(valid, cam, light, lambda r: r["read_blurred"] == r["card"]).values() for x in v]
+            if raw:
+                num(f"rigReadRaw{cam}{light.title()}", 100 * np.mean(raw), "{:.0f}")
+            sp = by_speed(rows, cam, light, lambda r: abs(float(r["speed_rpm"])) if r["speed_rpm"] else None)
+            if not sp:
+                continue
+            err = {v: 100 * (np.array(e) / v - 1) for v, e in sp.items()}
+            b.errorbar(np.array(list(sp)) + style_dx(cam, light), [np.mean(e) for e in err.values()],
+                       [np.std(e) for e in err.values()], fmt=mk, color=col, ms=3, capsize=2)
+            for v, e in err.items():
+                num(f"rigSpeed{cam}{light.title()}{WORD[v]}", np.mean(e), "{:+.1f}")
+                num(f"rigSpeed{cam}{light.title()}{WORD[v]}Sd", np.std(e))
+            within = np.concatenate([np.abs(e) <= 5 for e in err.values()])
+            num(f"rigSpeedWithin{cam}{light.title()}", int(within.sum()), "{}")
+            num(f"rigSpeedAll{cam}{light.title()}", within.size, "{}")
+            num(f"rigSpeedWorst{cam}{light.title()}", max(np.abs(e).max() for e in err.values()))
+            edges = sum(r["speed_at_edge"] == "1" for r in rows if r["method"] == CAMS[cam][0]
+                        and r["date"] == CAMS[cam][1] and r["light"] == light)
+            num(f"rigSpeedEdge{cam}{light.title()}", edges, "{}")
+    a.set_xticks(sorted(WORD)), a.set_ylim(-5, 105), a.set_xlabel("fan speed (rpm)")
+    a.set_ylabel("letters read (%)"), a.set_title("(a) OCR, deblurred", fontsize=7)
+    a.legend(frameon=False, fontsize=4.5, ncol=2)
+    b.axhspan(-5, 5, color="0.9", lw=0), b.axhline(0, color="k", lw=0.5)
+    b.set_xticks(sorted(WORD)), b.set_xlabel("commanded speed (rpm)"), b.set_ylabel("speed error (%)")
+    b.set_title("(b) speed from the blur", fontsize=7)
+    for ax in (a, b):
+        ax.grid(alpha=0.3, lw=0.4)
+    save(fig, "rig_criteria")
+
+
+def style_dx(cam, light):
+    """side-by-side offsets so the four series of a speed do not overlap"""
+    return {("", "coded"): -0.15, ("", "steady"): -0.05, ("Rs", "coded"): 0.05, ("Rs", "steady"): 0.15}[(cam, light)]
 
 
 # ---------------------------------------------------------------- simulation: deblurred images and speed
@@ -295,7 +417,7 @@ def fig_rows():
 
 if __name__ == "__main__":
     print("figures:")
-    for f in (fig_code, fig_timing, fig_real, fig_rig, fig_demo, fig_rows):
+    for f in (fig_code, fig_timing, fig_real, fig_rig, fig_rig_rows, fig_rig_criteria, fig_demo, fig_rows):
         f()
     (HERE / "numbers.tex").write_text(
         "% written by make_figures.py: do not edit by hand\n"
