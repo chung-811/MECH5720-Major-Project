@@ -39,6 +39,8 @@ ap.add_argument("--rpm", type=float, help="the speed, signed (default: from each
 ap.add_argument("--method", choices=("global", "rs-row", "rs-frame"), default="global")
 ap.add_argument("--date", required=True, help="the session, written in every row")
 ap.add_argument("--out", required=True, help="CSV to add the rows to; captures already in it are skipped")
+ap.add_argument("--cards", help="also save each capture's card (as captured, deblurred, on the still) to this folder, "
+                "one npz per capture: the report's rig figure")
 args = ap.parse_args()
 
 calib = json.loads(Path(args.calib).read_text())
@@ -92,6 +94,11 @@ with out.open("a", newline="") as f:
             half = ocr.card_half(scene.r[-1])
             read = {k: ocr.read_letter(ocr.card_crop(v, scene.hub, rc, thc, half)) for k, v in
                     (("card", truth), ("read", x), ("read_blurred", img))}
+            if args.cards:                     # a wider square than OCR's, for context, blade pointing down
+                Path(args.cards).mkdir(parents=True, exist_ok=True)
+                np.savez_compressed(Path(args.cards) / f"{path.stem}.npz", **{
+                    k: ocr.card_crop(np.clip(v, 0, None), scene.hub, rc, thc, round(2.2 * half)).astype(np.float16)
+                    for k, v in (("capture", img), ("deblurred", x), ("still", truth))})
             # one line's timing is every line's when each saw the whole code: it starts after the last line
             # opens and ends before the first one closes
             whole = args.method == "global" or timing["readout_s"] <= timing["t0"] and \

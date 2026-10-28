@@ -29,8 +29,9 @@ Our first captures used a CD spun by hand (\cref{fig:real}a). The speed changed 
 exposure, so no single blur explained the image and none could be deblurred. This is why the rig
 uses a stepper motor. In simulation, a speed error of 1, 2 and 5\% costs 0.8, 2.7 and \SI{8.5}{dB};
 the motor sketch's nominal 2048 steps per revolution against the true 2038 alone makes the fan 0.5\%
-fast, which the speed search (\cref{sec:speed}) corrects. On the rig, though, the speed search read
-\SI{2.46}{rpm} for a fan turning at about \SI{3}{rpm}, so the rig results use the commanded speed. % STUDIES.md, fault costs
+fast, which the speed search (\cref{sec:speed}) corrects in simulation. On the rig, though, its residual
+read 1 to 13\% low, so the rig deblurs at the commanded speed and measures the speed by matching the
+blur instead. % STUDIES.md, fault costs
 \TODO{Measured speed ripple of the stepper, if any.}
 
 \paragraph{The background must be dark.}

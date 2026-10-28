@@ -26,6 +26,7 @@ def load(path):
 
 
 def save(path, calib):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(calib, indent=2) + "\n")
     print(f"{path}: {json.dumps(calib)}")
 
@@ -95,6 +96,7 @@ def auto(a):
                  monitor=m if m.get("tau") else {**real.MONITOR, "t0": m.get("t0", 0.0)})   # fitted by `monitor`: kept
     if len(frames) > 2:                            # the blades are somewhere else in each still, so the minimum
         static = Path(a.calib).with_name(Path(a.calib).stem + "_static.npy")     # is what never moves
+        static.parent.mkdir(parents=True, exist_ok=True)
         np.save(static, np.min(frames, 0))
         calib["static"] = static.name
         print(f"static scene (what never moves, taken out of each capture): {static}")

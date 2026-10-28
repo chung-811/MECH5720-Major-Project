@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import numpy as np
 import scipy.sparse as sp
@@ -15,6 +16,7 @@ CODE, chip = F.RASKAR52, args.chip
 NOISE = dict(full_e=10000, read_e=3.0)
 Tc = len(CODE) * chip
 
+rows = []                                       # blur px, light, coded, constant, short (PSNR dB)
 print(f"{'rpm':>5s} {'blur px':>8s} {'light':>6s} {'coded':>8s} {'constant':>9s} {'short+denoise':>14s}  (PSNR dB)")
 for path in args.renders:
     scene = F.load(path)
@@ -30,3 +32,6 @@ for path in args.renders:
         out.append(F.score(scene, F.wrap(scene, F.dpir(sp.identity(P.size, format="csr"), 0, P)))[0])
         print(f"{scene.omega * 60 / (2 * np.pi):5.2f} {scene.omega * Tc * scene.r[-1]:8.0f} {light:6.1f} "
               + " ".join(f"{v:8.2f}" for v in out), flush=True)
+        rows.append([scene.omega * Tc * scene.r[-1], light, *out])
+Path("out").mkdir(exist_ok=True)
+np.save("out/coding_gain.npy", np.array(rows))                  # for the report's table (make_figures.py)

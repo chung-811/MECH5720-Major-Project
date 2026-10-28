@@ -8,11 +8,13 @@ Inputs:
   - code files: software/data_capture/coded/params/          (in the repo)
   - real captures and run logs: output/gs_cd, output/rs_cd   (Ollie's 21 Oct hand-spun CD session)
   - rig numbers: figures/data/rig.csv                       (software/deconvolution/rig_eval.py, in the repo)
+  - rig cards: figures/data/rig_cards/*.npz                 (rig_eval.py --cards, in the repo)
   - simulation results: software/deconvolution/out/demo_*.npz and rows_*_axis*.npz, written by
         uv run python demo.py renders/blade.npz
         uv run python demo.py renders/blade_tex.npz
         uv run python rows.py renders/blade_tex.npz 0
         uv run python rows.py renders/blade_tex.npz 1
+        uv run python coding_gain.py renders/blade_tex.npz renders/blade_tex_0.7.npz renders/blade_tex_1.4.npz
     (the renders come from blender/render_fan.py, see software/deconvolution/STUDIES.md)
 
 A figure whose input is missing is skipped and listed at the end (exit code 1).
@@ -303,6 +305,57 @@ def style_dx(cam, light):
     return {("", "coded"): -0.15, ("", "steady"): -0.05, ("Rs", "coded"): 0.05, ("Rs", "steady"): 0.15}[(cam, light)]
 
 
+def fig_rig_cards(speed=8):
+    """the card as captured, deblurred and on the still, for the median capture (by PSNR, the lower of two) of
+    each camera and light at one speed: data/rig_cards/<capture>.npz, from rig_eval.py --cards"""
+    rows = rig_rows()
+    if rows is None:
+        return
+    picks = []
+    for cam in CAMS:
+        for light in ("coded", "steady"):
+            s = sorted(by_speed(rows, cam, light, lambda r: r).get(speed, []), key=lambda r: float(r["psnr_db"]))
+            if not s:
+                missing.append(f"data/rig.csv: no {light} {CAMS[cam][2]} rows at {speed} rpm")
+                return
+            picks.append((cam, light, s[(len(s) - 1) // 2]))
+    if not all(need(HERE / f"data/rig_cards/{r['capture']}.npz") for *_, r in picks):
+        return
+    fig, axs = plt.subplots(3, 4, figsize=(COL, 2.75))
+    for j, (cam, light, r) in enumerate(picks):
+        z = np.load(HERE / f"data/rig_cards/{r['capture']}.npz")
+        for i, k in enumerate(("capture", "deblurred", "still")):
+            c = z[k].astype(np.float32)
+            axs[i, j].imshow(c, cmap="gray", vmin=0, vmax=max(np.percentile(c, 99.5), 1e-6))
+            axs[i, j].set_xticks([]), axs[i, j].set_yticks([])
+        axs[0, j].set_title(f"{'global' if not cam else 'rolling'}, {light}", fontsize=7)
+        axs[1, j].set_title(f"{float(r['psnr_db']):.1f} dB, " + (f"reads {r['read']}" if r["read"] else "no letter read"),
+                            fontsize=6)
+        num(f"rigCard{cam}{light.title()}", float(r["psnr_db"]))
+    for i, k in enumerate(("capture", "deblurred", "still")):
+        axs[i, 0].set_ylabel(k, fontsize=7)
+    for a in axs.ravel():
+        for s in a.spines.values():
+            s.set_visible(False)
+    num("rigCardSpeed", speed, "{}")
+    save(fig, "rig_cards")
+
+
+def gain_table():
+    """the coding gain rows of the solver table: out/coding_gain.npy, from coding_gain.py"""
+    path = SIM / "coding_gain.npy"
+    if not need(path):
+        return
+    g = np.load(path)                                   # blur px, light, coded, constant, short (PSNR dB)
+    for i, blur in enumerate(sorted(set(np.round(g[:, 0])))):
+        w = ("One", "Two", "Three")[i]
+        num(f"gainBlur{w}", blur, "{:.0f}")
+        for row in g[np.round(g[:, 0]) == blur]:
+            light = "Full" if row[1] == 1 else "Tenth"
+            for name, v in zip(("Coded", "Steady", "Short"), row[2:]):
+                num(f"gain{name}{light}{w}", v)
+
+
 # ---------------------------------------------------------------- simulation: deblurred images and speed
 def crop(truth, margin=12):
     r, c = np.nonzero(truth > 0.02 * truth.max())
@@ -417,7 +470,8 @@ def fig_rows():
 
 if __name__ == "__main__":
     print("figures:")
-    for f in (fig_code, fig_timing, fig_real, fig_rig, fig_rig_rows, fig_rig_criteria, fig_demo, fig_rows):
+    for f in (fig_code, fig_timing, fig_real, fig_rig, fig_rig_rows, fig_rig_criteria, fig_rig_cards, fig_demo,
+              gain_table, fig_rows):
         f()
     (HERE / "numbers.tex").write_text(
         "% written by make_figures.py: do not edit by hand\n"

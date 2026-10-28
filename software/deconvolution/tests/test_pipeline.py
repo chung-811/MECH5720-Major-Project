@@ -326,16 +326,17 @@ def test_quick_calibration_end_to_end(tmp_path):
 
 def test_auto_flags_a_camera_bump_between_stills(tmp_path):
     """three stills, the camera nudged 2 px before the middle one: two stills cannot show it, the pairs
-    of three disagree and auto says so"""
+    of three disagree and auto says so. The calibration goes in a folder that does not exist yet"""
     here = Path(__file__).parents[1]
     rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
     rng = np.random.default_rng(3)
     for i in range(3):
         f = blade(rows, cols, START + 0.3 * i) + rng.normal(0, 0.005, SHAPE)
         np.save(tmp_path / f"s{i}.npy", np.roll(f, (2, -2), (0, 1)) if i == 1 else f)
-    out = subprocess.run([sys.executable, "calibrate.py", "auto", tmp_path / "c.json", *[tmp_path / f"s{i}.npy" for i in range(3)],
+    out = subprocess.run([sys.executable, "calibrate.py", "auto", tmp_path / "new/c.json", *[tmp_path / f"s{i}.npy" for i in range(3)],
                           "--deg", str(np.degrees(0.3)), "--out", tmp_path], cwd=here, capture_output=True, text=True, check=True).stdout
     assert "the pairs disagree" in out
+    assert (tmp_path / "new/c.json").exists() and (tmp_path / "new/c_static.npy").exists()
 
 
 def test_wrong_rpm_sign_is_caught_and_corrected(capsys):

@@ -3,14 +3,16 @@
 \section{Introduction}
 \label{sec:intro}
 
-\begin{figure}[b]
+\begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{teaser}
-  \caption{Coded light makes motion blur reversible. Left: a simulated photograph of a fan blade
-  turning during one \SI{0.87}{s} exposure while the light flashes a 52-bit on/off code. Middle: our
-  reconstruction, \psnrGsTex~dB against the stopped blade (right).
-  \TODO{Replace with the same three panels from the rig once captured.}}
-  \label{fig:teaser}
+  \includegraphics[width=\linewidth]{rig_cards}
+  \caption{Coded light makes motion blur reversible, on the rig. The letter card on one blade of the fan
+  turning at \SI{\rigCardSpeed}{rpm}, from the median capture (by PSNR) of each camera and light. Top: the
+  capture, one exposure of 1.1 to \SI{1.4}{s}. Middle: our reconstruction, with its PSNR against the still
+  and the letter a character reader finds in it. Bottom: a still of the stopped fan, turned onto the
+  reconstructed blade. With coded light the letter comes back on both cameras, with some stripes left;
+  with steady light of the same length it does not. Each panel is scaled to its own brightness.}
+  \label{fig:rig-cards}
 \end{figure}
 
 Photographing anything that moves forces a trade-off between blur and noise. A long exposure collects
@@ -29,7 +31,7 @@ We build such a system with \emph{coded illumination}: a monitor beside the came
 while the camera holds one long exposure, so the camera itself needs no modification
 (\cref{fig:system}). The subject is a fan with letters on its blades, driven by a stepper motor at a
 known speed. After unwrapping the image about the hub, the rotation becomes a simple shift and the
-blur becomes a known linear operator that we invert (\cref{fig:teaser}).
+blur becomes a known linear operator that we invert (\cref{fig:rig-cards}).
 
 What is new is a three-way comparison of how the camera's shutter interacts with the code. A global
 shutter exposes every row at once. A rolling shutter exposes row by row, so each row sees a slightly

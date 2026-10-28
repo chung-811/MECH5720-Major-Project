@@ -53,8 +53,8 @@ spectrum has exact zeros; a good code keeps every frequency well above zero (\cr
   for six rows with the readout four times longer than the rolling shutter camera's
   \SI{64}{ms} so that the stagger is visible. (a) With the exposure equal to the code, each row sees
   a different slice of the code, so one blur for the whole frame is wrong for most rows. (b) Our
-  capture software lengthens the exposure by the readout time plus \SI{50}{ms}, so every row sees
-  the whole code.}
+  capture software lengthens the exposure by the readout time plus a margin (\SI{250}{ms} on the
+  rolling shutter camera), so every row sees the whole code.}
   \label{fig:timing}
 \end{figure}
 
@@ -64,7 +64,7 @@ where $T_\mathrm{ro}$ is the readout time. \emph{Per row} uses each sample's own
 \emph{per frame} uses the middle line's $s_\ell$ for every sample, as a pipeline that ignores the
 rolling shutter would. \Cref{fig:timing}a shows why per frame then fails: the rows see different
 slices of the code. Our capture software avoids this by construction (\cref{fig:timing}b): it
-exposes for the code plus the readout plus \SI{50}{ms} of padding, so every row sees the full code
+exposes for the code plus the readout plus a margin, so every row sees the full code
 and the two rolling shutter methods coincide. We therefore compare them in simulation with the
 exposure equal to the code, where they differ most.
 
@@ -140,7 +140,7 @@ instead of an ideal screen improved 40 of 46 real global shutter captures (all a
     Parameter & Value \\
     \midrule
     Code & \rigBits~bits, \rigCodeMs~ms each, \rigCodeS~s \\
-    Exposure & code + readout + \SI{0.05}{s} \\
+    Exposure, global / rolling & code + readout + 0.05 / \SI{0.25}{s} \\
     Global shutter camera & Sony IMX296, $1456\times1088$ \\
     Rolling shutter camera & OV5647, $2592\times1944$ \\
     Readout, global / rolling & 16.6 / \SI{64.0}{ms} \\
