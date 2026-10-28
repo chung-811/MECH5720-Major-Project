@@ -159,7 +159,8 @@ READOUT_MAX, T0_MAX = 0.15, 0.1          # s, fit_readout's search: past either,
 
 # Ollie's monitor, from a white dot on a blade (gs_dot, 28 Oct, code_16bit_best_4refresh, 3 rpm): it brightens
 # with a 44 ms time constant and goes dark at once, so a one-bit (67 ms) flash peaks at 78% of white. Deblurring
-# with it instead of an ideal screen was better on all 46 real captures (3, 5 and 8 rpm), 0.65 to 0.82 dB a set
+# with it instead of an ideal screen was better on 40 of 46 global shutter captures (all at 3 and 5 rpm, 5 of 11
+# at 8 rpm), 0.3 to 0.8 dB a set on average; on 3 rolling shutter captures an ideal screen did 0.15-0.6 dB better
 MONITOR = dict(black=0.0, rise=0.044, fall=0.0, t0=0.0)
 
 

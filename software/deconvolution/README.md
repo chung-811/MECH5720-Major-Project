@@ -51,7 +51,8 @@ other way" and fixes it itself). Don't use `--find-speed` for now: on the first 
 for a fan really turning at about 3; the commanded speed is accurate.
 
 The monitor's lag is built in: from the white dot captures (28 Oct), it takes about 44 ms to brighten and
-goes dark at once. Modelling that made every one of the 46 real captures sharper. `deblur.py` redoes a
+goes dark at once. Modelling that made 40 of 46 global shutter captures sharper (0.3 to 0.8 dB on
+average). `deblur.py` redoes a
 calibration from before it; the other scripts warn (`*** ... switching at once`). Copy `output/` somewhere
 safe before leaving.
 
