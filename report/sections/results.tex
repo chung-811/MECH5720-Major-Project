@@ -15,8 +15,8 @@
   \includegraphics[width=\linewidth]{code_spectrum}
   \caption{(a) The monitor's brightness during one exposure for our rig's code, steady light, and
   the 52-bit code of Raskar et al.~\cite{raskar2006coded}. (b) The magnitude of each blur's spectrum
-  (zero-padded DFT, 1 at zero frequency). Steady light has exact zeros, where detail is lost. So does
-  our current \rigBits-bit rig code, at multiples of $1/9$ cycle per bit; the 52-bit code never falls
+  (zero-padded DFT, 1 at zero frequency). Steady light has exact zeros, where detail is lost. The
+  \rigBits-bit code used for every rig result never falls below \rigMinMTF, and the 52-bit code
   below \raskarMinMTF.}
   \label{fig:code}
 \end{figure}
@@ -34,16 +34,14 @@
 
 The light a code lets through is fixed before any capture, and \cref{fig:code} compares the codes.
 Steady light has exact spectral zeros. The 52-bit code of~\cite{raskar2006coded} keeps every
-frequency above \raskarMinMTF~of its zero-frequency value. The \rigBits-bit code currently used on
-the rig also has exact zeros, at multiples of $1/9$ cycle per bit, so it loses some detail just as
-steady light does; \cref{sec:limitations} discusses the replacement.
-\TODO{Measured blur of a bright dot on a blade, overlaid on (a), once captured.}
+frequency above \raskarMinMTF~of its zero-frequency value, and the \rigBits-bit code used on the rig
+above \rigMinMTF, so neither loses detail outright.
 
 The monitor shows the code on time. Over \realRuns~captures, \realWithinOneMs~of \realBits~bits
 appeared within \SI{1}{ms} of schedule (\cref{fig:real}b). The only late bit was the first switch to
 black, at most \realMaxLateMs~ms late, or \realMaxLatePct\% of a \realBitMs~ms bit. These times come
-from the display software, not an optical measurement. \TODO{Confirm with a photodiode or a
-high-frame-rate video of the monitor if time allows.}
+from the display software. Measured optically with a white dot (\cref{sec:calibration}), the
+screen brightens slowly, which the pipeline now models.
 
 \subsection{Simulation: does the pipeline work?}
 \label{sec:results-sim}
@@ -136,8 +134,15 @@ Across three speeds and three noise draws every estimate was within 0.26\%.
 
 \subsection{Rig results}
 \label{sec:results-rig}
-\TODO{The three success criteria on the real fan, mean $\pm$ std over 10 captures per speed. Re-use
-the simulation figures' layout so the two can be compared directly.}
+With the global shutter camera, coded light deblurs to \rigCodedThree, \rigCodedFive~and
+\rigCodedEight~dB at 3, 5 and \SI{8}{rpm}, against \rigSteadyThree, \rigSteadyFive~and
+\rigSteadyEight~dB for steady light of the same length deblurred by the same solver: \rigGapMin~to
+\rigGapMax~dB better at every speed, by more than the spread between captures
+(\cref{fig:rig-psnr,tab:summary}). Every capture was deblurred, none skipped. An earlier session at
+\SI{3}{rpm}, with a different setup, gave \rigOctTwentySix~$\pm$~\rigOctTwentySixSd~dB over
+\rigOctTwentySixN~captures. PSNR is against a still of the stopped fan with the static scene taken
+out of both (\cref{sec:calibration}), so it scores the blades alone. \TODO{Rolling shutter
+(criterion 1), letters read (criterion 2) and speed from the photograph (criterion 3) on the rig.}
 
 \begin{figure}[t]
   \centering
@@ -149,10 +154,12 @@ the simulation figures' layout so the two can be compared directly.}
 
 \begin{figure}[t]
   \centering
-  \placeholder{Criterion 2: fraction of letters read (OCR) against speed (rpm) for coded+deblur,
-  steady+deblur, short exposure. Error bars.}
-  \caption{\TODO{Target: at least 90\% read with coded light where steady light gives under 50\%.}}
-  \label{fig:legibility}
+  \includegraphics[width=\linewidth]{rig_psnr}
+  \caption{The rig, global shutter: PSNR of the deblurred blades against the stopped fan, coded light
+  and steady light of the same length, both deblurred with the same solver and monitor model. Bars:
+  mean $\pm$ std over \rigCodedThreeN, \rigCodedFiveN~and \rigCodedEightN~coded and 10 steady
+  captures; dots: each capture.}
+  \label{fig:rig-psnr}
 \end{figure}
 
 \begin{figure}[t]
@@ -165,20 +172,20 @@ the simulation figures' layout so the two can be compared directly.}
 
 \begin{table}[t]
   \centering\small
-  \caption{\TODO{Rig summary, mean $\pm$ std over 10 captures at \X~rpm.}}
+  \caption{The rig, global shutter: PSNR (dB) of the deblurred blades, mean $\pm$ std over
+  \rigCodedThreeN, \rigCodedFiveN~and \rigCodedEightN~coded and 10 steady captures.
+  \TODO{Rolling shutter rows, short exposure, letters read.}}
   \label{tab:summary}
   \begin{tabular}{@{}lccc@{}}
     \toprule
-    Method & PSNR (dB) & SSIM & Letters read \\
+    Light & \SI{3}{rpm} & \SI{5}{rpm} & \SI{8}{rpm} \\
     \midrule
-    Global shutter & \X & \X & \X \\
-    Rolling, per frame & \X & \X & \X \\
-    Rolling, per row & \X & \X & \X \\
-    Steady light + deblur & \X & \X & \X \\
-    Short exposure & \X & \X & \X \\
+    Coded + deblur & \rigCodedThree~$\pm$~\rigCodedThreeSd & \rigCodedFive~$\pm$~\rigCodedFiveSd
+      & \rigCodedEight~$\pm$~\rigCodedEightSd \\
+    Steady + deblur & \rigSteadyThree~$\pm$~\rigSteadyThreeSd & \rigSteadyFive~$\pm$~\rigSteadyFiveSd
+      & \rigSteadyEight~$\pm$~\rigSteadyEightSd \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\TODO{Rig criterion 1 (\cref{fig:rig-rows}), criterion 2 (\cref{fig:legibility}), criterion 3
-(\cref{fig:rig-speed}), summary (\cref{tab:summary}).}
+\TODO{Rig criterion 1 (\cref{fig:rig-rows}) and criterion 3 (\cref{fig:rig-speed}).}

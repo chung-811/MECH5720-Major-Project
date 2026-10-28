@@ -95,11 +95,25 @@ if $-\omega$ fits better than $+\omega$ by a margin of 10\%, the sign is flipped
 \label{sec:calibration}
 The pipeline needs the hub centre, the radii of the blades and the arc they occupy. We find all
 three from three photographs of the stopped fan, turned by a known number of motor steps between
-them (\SI{4076}{} half-steps per revolution). For each pair of photographs we search for the centre
+them (\SI{2038}{} full steps per revolution). For each pair of photographs we search for the centre
 about which one rotates into the other, first on a coarse grid and then by Nelder-Mead; the median
-over the pairs is the hub, and a spread above \SI{1}{px} warns that the camera moved. The code timing
-comes from each capture's log, and a photograph of the stopped fan in the same setup is the
-reference for image quality. \TODO{Measured hub spread on the rig: \X~px.}
+over the pairs is the hub, and a spread above \SI{1}{px} warns that the camera moved. On the rig the
+pairs agreed to within \SI{0.6}{px} (\SI{2.0}{px} in an earlier session). The pixel-wise minimum of
+the stills is what never moves (mount, bolts, wires); a scaled copy, fitted outside the blade circle,
+is subtracted from every capture and from the reference, so only the blades are deblurred and scored.
+Without it, the search for the blade locked onto wires and glare and skipped 4 of our first 11 captures. The code
+timing comes from each capture's log, and a photograph of the stopped fan in the same setup is the
+reference for image quality.
+
+\paragraph{Monitor.} The model assumed a screen that switches at once. To measure the real one we put
+a white dot beyond a blade tip on black tape and photographed it at \SI{3}{rpm} under the code: the
+dot's streak is the light over time. Over five captures, a lag that brightens with a \SI{44}{ms} time
+constant and dims at once explains the streaks with a third of the misfit of an ideal screen, and
+better than one lag both ways; a one-bit flash then peaks at 78\% of white. The pipeline models
+$L(t)$ this way, starting from black (the screen is black before the code). Deblurring with it
+instead of an ideal screen improved every one of 46 real captures, by 0.65 to \SI{0.82}{dB} on
+average per set, and rise times from 30 to \SI{55}{ms} all give the same result within
+\SI{0.2}{dB}.
 
 \subsection{Experimental protocol}
 \label{sec:protocol}
@@ -107,8 +121,7 @@ reference for image quality. \TODO{Measured hub spread on the rig: \X~px.}
 \begin{table}[t]
   \centering\small
   \caption{Rig and capture parameters. Readout times are the capture software's estimate (one over
-  the sensor mode's maximum frame rate), logged with every capture. \TODO{Update the code if it is
-  replaced (\cref{sec:limitations}).}}
+  the sensor mode's maximum frame rate), logged with every capture.}
   \label{tab:params}
   \begin{tabular}{@{}ll@{}}
     \toprule
@@ -119,9 +132,9 @@ reference for image quality. \TODO{Measured hub spread on the rig: \X~px.}
     Global shutter camera & Sony IMX296, $1456\times1088$ \\
     Rolling shutter camera & OV5647, $2592\times1944$ \\
     Readout, global / rolling & 16.6 / \SI{64.0}{ms} \\
-    Motor & 28BYJ-48, \SI{4076}{} half-steps/rev \\
-    Fan speeds & \TODO{3, 5, 8, 10}~rpm \\
-    Captures per condition & 10 \\
+    Motor & 28BYJ-48, \SI{2038}{} full steps/rev \\
+    Fan speeds & 3, 5, 8~rpm \\
+    Captures per condition & 10 to 12 \\
     Camera to fan & \X~cm \\
     \bottomrule
   \end{tabular}
@@ -136,6 +149,7 @@ read noise and a 10-bit converter, with steady light filling 70\% of the well on
 the 52-bit code of~\cite{raskar2006coded} at one bit per refresh (\SI{0.87}{s}). The short exposure
 baseline is a single \SI{16.7}{ms} bit with $16\times$ analogue gain.
 
-\paragraph{Rig.} \TODO{For each speed (\cref{tab:params}): 10 coded captures, 10 with steady light,
-10 short exposures, and a reference photograph of the stopped fan in the same setup. Ground truth
-speed from the step rate. Dark room.}
+\paragraph{Rig.} For each speed (\cref{tab:params}), global shutter: 11 or 12 coded captures and 10
+under steady light of the same length, after three stills of the stopped fan 400 steps apart, the
+third also the reference. Ground truth speed from the step rate. Dark room. \TODO{Rolling shutter
+and short exposures.}

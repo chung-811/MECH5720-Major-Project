@@ -7,7 +7,9 @@ camera, and a pipeline that reverses the blur and recovers the speed of a spinni
 single photograph. In simulation the reconstruction reaches \psnrGsTex~dB on a textured blade, per-row
 rolling shutter matches the global shutter to within \rowsMaxMeanGapA~dB on average, and the speed is recovered to
 within \speedErrTex\%. On the rig, the monitor shows the code to within \SI{1}{ms} for
-\realWithinOneMs~of \realBits~bits. \TODO{Rig results against each success criterion.}
+\realWithinOneMs~of \realBits~bits, and with the global shutter at 3 to \SI{8}{rpm} coded light
+deblurs \rigGapMin~to \rigGapMax~dB better than steady light. \TODO{Rig results for the rolling
+shutter, letters read and speed.}
 
 With two more months we would replace the monitor with an LED, whose microsecond switching would
 allow codes hundreds of bits long; design codes for the rolling shutter, so that its row timing adds

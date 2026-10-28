@@ -28,8 +28,9 @@
 Our first captures used a CD spun by hand (\cref{fig:real}a). The speed changed during each
 exposure, so no single blur explained the image and none could be deblurred. This is why the rig
 uses a stepper motor. In simulation, a speed error of 1, 2 and 5\% costs 0.8, 2.7 and \SI{8.5}{dB};
-the stepper's nominal 4096 steps per revolution against the true 4076 alone makes the fan 0.5\%
-fast, which the speed search (\cref{sec:speed}) corrects. % STUDIES.md, fault costs
+the motor sketch's nominal 2048 steps per revolution against the true 2038 alone makes the fan 0.5\%
+fast, which the speed search (\cref{sec:speed}) corrects. On the rig, though, the speed search read
+\SI{2.46}{rpm} for a fan turning at about \SI{3}{rpm}, so the rig results use the commanded speed. % STUDIES.md, fault costs
 \TODO{Measured speed ripple of the stepper, if any.}
 
 \paragraph{The background must be dark.}
@@ -37,11 +38,12 @@ Anything bright behind the blades is blurred by the code too, and is not in the 
 stand behind the fan drops the reconstruction to about \SI{10}{dB} (\cref{tab:faults}), so the rig
 uses a matte black backing in a dark room.
 
-\paragraph{The current rig code has spectral zeros.}
-The \rigBits-bit code on the rig loses detail at multiples of $1/9$ cycle per bit
-(\cref{fig:code}b), like steady light. DPIR's prior hides much of the loss in simulation, but the
-loss is fundamental. \TODO{Swap for a code without zeros (e.g.\ the 52-bit code, or a searched
-16-bit code) and state which one the rig results use.}
+\paragraph{The monitor is slow to brighten.}
+Our first rig code had exact spectral zeros; the rig results use a searched \rigBits-bit code
+without them (\cref{fig:code}b). With the monitor's \SI{44}{ms} rise (\cref{sec:calibration}),
+though, a one-bit flash gives only about half its designed light, so short flashes count for less
+than the code assumes. A code searched with the measured monitor in the loop, or a faster light,
+should do better.
 
 \paragraph{Speed, light and timing.}
 Above about \SI{10}{rpm} the blades smear into each other and quality falls quickly

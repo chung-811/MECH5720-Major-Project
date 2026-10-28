@@ -7,6 +7,7 @@ number is typed by hand.
 Inputs:
   - code files: software/data_capture/coded/params/          (in the repo)
   - real captures and run logs: output/gs_cd, output/rs_cd   (Ollie's 21 Oct hand-spun CD session)
+  - rig scores: figures/data/rig_psnr.csv                    (deblur.py on the 26 and 28 Oct captures, in the repo)
   - simulation results: software/deconvolution/out/demo_*.npz and rows_*_axis*.npz, written by
         uv run python demo.py renders/blade.npz
         uv run python demo.py renders/blade_tex.npz
@@ -71,7 +72,7 @@ def bits(name):
 
 # ---------------------------------------------------------------- designed code and its spectrum
 def fig_code():
-    rig, rig_T = bits("code_16bit_4refresh.json")
+    rig, rig_T = bits("code_16bit_best_4refresh.json")
     codes = {f"rig code ({len(rig)} bits)": rig,
              f"box, steady light ({len(rig)} bits)": np.ones(len(rig)),
              "Raskar et al. (52 bits)": np.array([int(c) for c in F.RASKAR52])}
@@ -94,7 +95,7 @@ def fig_code():
 
 # ---------------------------------------------------------------- exposure timing
 def fig_timing():
-    rig, Tc = bits("code_16bit_4refresh.json")
+    rig, Tc = bits("code_16bit_best_4refresh.json")
     Tro, pad, rows = 0.25, 0.05, 6     # readout drawn 4x the OV5647's (~64 ms) so the stagger is visible
     fig, axs = plt.subplots(2, 1, figsize=(COL, 2.0), sharex=True)
     for a, (title, T, first) in zip(axs, [
@@ -143,6 +144,41 @@ def fig_real():
     slow = sorted(set(idx[late > 1].tolist()))          # which bits were more than 1 ms late
     num("realLateBits", ", ".join(map(str, slow)) if slow else "none")
     save(fig, "real_cd")
+
+
+# ---------------------------------------------------------------- real rig: coded against steady light
+WORD = {3: "Three", 5: "Five", 8: "Eight"}
+
+
+def fig_rig():
+    """PSNR against speed on the rig (global shutter), coded and steady light, from data/rig_psnr.csv"""
+    path = HERE / "data/rig_psnr.csv"
+    if not need(path):
+        return
+    rows = [l.split(",") for l in path.read_text().splitlines() if l and not l.startswith(("#", "date"))]
+    score = {}
+    for date, light, rpm, _, p, _ in rows:
+        score.setdefault((date, light, int(rpm)), []).append(float(p))
+    fig, a = plt.subplots(figsize=(COL, 1.7))
+    for light, col, mk, dx in (("coded", "C0", "o", -0.12), ("steady", "C3", "s", 0.12)):
+        rpms = sorted(r for d, l, r in score if d == "2026-10-28" and l == light)
+        for r in rpms:
+            p = np.array(score[("2026-10-28", light, r)])
+            a.scatter(np.full(p.size, r + dx) + np.linspace(-0.05, 0.05, p.size), p, s=3, color=col, alpha=0.35, lw=0)
+            num(f"rig{light.title()}{WORD[r]}", p.mean()), num(f"rig{light.title()}{WORD[r]}Sd", p.std())
+            num(f"rig{light.title()}{WORD[r]}N", p.size, "{}")
+        m = [np.mean(score[("2026-10-28", light, r)]) for r in rpms]
+        sd = [np.std(score[("2026-10-28", light, r)]) for r in rpms]
+        a.errorbar(np.array(rpms) + dx, m, sd, fmt=mk + "-", color=col, ms=3, capsize=2,
+                   label=f"{light} light + deblur")
+    gaps = [np.mean(score[("2026-10-28", "coded", r)]) - np.mean(score[("2026-10-28", "steady", r)])
+            for r in sorted(WORD) if ("2026-10-28", "steady", r) in score]
+    num("rigGapMin", min(gaps)), num("rigGapMax", max(gaps))
+    p26 = np.array(score[("2026-10-26", "coded", 3)])
+    num("rigOctTwentySix", p26.mean()), num("rigOctTwentySixSd", p26.std()), num("rigOctTwentySixN", p26.size, "{}")
+    a.set_xticks(sorted(WORD)), a.set_xlabel("fan speed (rpm)"), a.set_ylabel("PSNR (dB)")
+    a.legend(frameon=False, fontsize=6), a.grid(alpha=0.3, lw=0.4)
+    save(fig, "rig_psnr")
 
 
 # ---------------------------------------------------------------- simulation: deblurred images and speed
@@ -259,7 +295,7 @@ def fig_rows():
 
 if __name__ == "__main__":
     print("figures:")
-    for f in (fig_code, fig_timing, fig_real, fig_demo, fig_rows):
+    for f in (fig_code, fig_timing, fig_real, fig_rig, fig_demo, fig_rows):
         f()
     (HERE / "numbers.tex").write_text(
         "% written by make_figures.py: do not edit by hand\n"
