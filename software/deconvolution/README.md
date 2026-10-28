@@ -82,6 +82,27 @@ All commands start with `uv run python`. `-h` on any of them lists every option.
 | `blender/`, `demo.py`, `rows.py`, `legibility.py`, `coding_gain.py`, `robust.py` | simulation studies |
 | `STUDIES.md` | how it works, simulation results, what each fault costs |
 
+### Experiment analysis
+
+`analyse.py` evaluates repeated captures against the success criteria and writes
+`capture_metrics.csv`, `summary.csv`, `quality.png`, `legibility.png`, and
+`speed_estimate.png`. The manifest must contain one row per DNG with
+`dng,speed_rpm,light`; `light` is `coded`, `constant`, or `short`. The
+`speed_rpm` value is the motor step-rate ground truth. Optional columns are
+`reference`, `calib`, `log`, `truth`, `gain`, and `dot`. `truth` is an `.npz`
+render containing the character labels required for OCR.
+
+Run it after collecting at least ten rows for each speed/light condition:
+
+```
+uv run python analyse.py experiment.csv --calib rs.json --out out/analysis
+```
+
+The coded rows are processed by all three methods (`global`, `rs-frame`, and
+`rs-row`). The output reports per-row-band PSNR, SSIM, OCR fraction, and blind
+speed estimates as mean ± sample standard deviation in `summary.csv`. A
+short-exposure row is brightness-boosted using `gain` and is not deconvolved.
+
 ## Extras
 
 - Calibrate by hand if `auto` fails: `calibrate.py grid CAP.dng` (picture with a pixel grid), read the
