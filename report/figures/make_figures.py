@@ -186,7 +186,7 @@ def fig_rig():
     rows = rig_rows()
     if rows is None:
         return
-    fig, a = plt.subplots(figsize=(COL, 1.8))
+    fig, a = plt.subplots(figsize=(COL, 1.65))
     style = {("", "coded"): ("C0", "o", -0.15), ("", "steady"): ("C3", "s", -0.05),
              ("Rs", "coded"): ("C2", "^", 0.05), ("Rs", "steady"): ("C1", "v", 0.15)}
     for cam in CAMS:
@@ -227,7 +227,7 @@ def fig_rig_rows():
     rows = rig_rows()
     if rows is None:
         return
-    fig, a = plt.subplots(figsize=(COL, 1.6))
+    fig, a = plt.subplots(figsize=(COL, 1.45))
     curve = {}
     for cam, col, mk in (("", "C0", "o"), ("Rs", "C2", "^")):
         b = np.array([v for s in by_speed(rows, cam, "coded", lambda r: [float(x) for x in r["bands_db"].split(";")]).values()
@@ -255,7 +255,7 @@ def fig_rig_criteria():
     rows = rig_rows()
     if rows is None:
         return
-    fig, (a, b) = plt.subplots(1, 2, figsize=(COL, 1.8))
+    fig, (a, b) = plt.subplots(1, 2, figsize=(COL, 1.65))
     style = {("", "coded"): ("C0", "o"), ("", "steady"): ("C3", "s"), ("Rs", "coded"): ("C2", "^"),
              ("Rs", "steady"): ("C1", "v")}
     for cam in CAMS:
@@ -441,16 +441,16 @@ def fig_rows():
         codes = list(dict.fromkeys(k.split("|")[0] for k in keys))
         ros = [str(r) for r in z["readout_names"]]
         chip = float(z["chip"])
-        fig, axs = plt.subplots(1, len(codes), figsize=(TEXT, 2.2), sharey=True)
-        for a, cname, code in zip(axs, codes, z["codes"]):
-            a.plot(res[f"{cname}|global|"], "k-", lw=1.6, label="global shutter")
-            for ro, col in zip(ros, ("C0", "C1", "C3")):
-                a.plot(res[f"{cname}|{ro}|per-frame"], "--", color=col, label=f"rolling {ro}, per frame")
-                a.plot(res[f"{cname}|{ro}|per-row"], "-", color=col, label=f"rolling {ro}, per row")
-            a.set_title(f"{len(str(code))}-bit code, {1e3 * len(str(code)) * chip:.0f} ms exposure")
-            a.set_xlabel("band of sensor lines, first to last read")
-        axs[0].set_ylabel("PSNR over the blade (dB)")
-        fig.legend(*axs[0].get_legend_handles_labels(), loc="outside lower center", ncol=4, frameon=False)
+        # drawn for the shortest code, where per frame fails most; the numbers below cover every code
+        fig, a = plt.subplots(figsize=(COL, 2.0))
+        cname, code = codes[-1], str(z["codes"][len(codes) - 1])
+        a.plot(res[f"{cname}|global|"], "k-", lw=1.6, label="global shutter")
+        for ro, col in zip(ros, ("C0", "C1", "C3")):
+            a.plot(res[f"{cname}|{ro}|per-frame"], "--", color=col, label=f"rolling {ro}, per frame")
+            a.plot(res[f"{cname}|{ro}|per-row"], "-", color=col, label=f"rolling {ro}, per row")
+        a.set_title(f"{len(code)}-bit code, {1e3 * len(code) * chip:.0f} ms exposure")
+        a.set_xlabel("band of sensor lines, first to last read"), a.set_ylabel("PSNR over the blade (dB)")
+        fig.legend(*a.get_legend_handles_labels(), loc="outside lower center", ncol=2, frameon=False, fontsize=5.5)
         save(fig, f"rows_axis{axis}")
         # numbers: mean and worst band per case, plus the largest per-row shortfall against global
         A = "ABCDEFGHIJ"[axis]

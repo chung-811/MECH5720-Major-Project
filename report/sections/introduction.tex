@@ -38,13 +38,8 @@ shutter exposes every row at once. A rolling shutter exposes row by row, so each
 different part of the code; we reconstruct it either with one blur for the whole frame or with each
 row's own blur. We also estimate the fan's speed from the photograph alone.
 
-Our contributions are:
-\begin{itemize}
-  \item a coded illumination rig with a stepper-driven fan and two cameras, global and rolling
-        shutter (\cref{sec:method});
-  \item an open reconstruction and speed estimation pipeline with automatic calibration, in the
-        accompanying repository;
-  \item a measured comparison of the three methods against steady light on the rig, and a short
-        exposure in simulation (\cref{sec:results}): coded light deblurs \rigGapMin~to \rigGapMax~dB
-        better than steady light on the global shutter camera, at every speed.
-\end{itemize}
+Our contributions are a coded illumination rig with a stepper-driven fan and a global and a rolling
+shutter camera (\cref{sec:method}); an open reconstruction and speed estimation pipeline with
+automatic calibration, in the accompanying repository; and a measured comparison of coded against
+steady light on both cameras, with the three shutter methods and a short exposure also compared in
+simulation (\cref{sec:results}).

@@ -85,47 +85,41 @@ third of the true noise after resampling, and DPIR performed best at twice the t
 
 \subsection{Speed from a single photograph}
 \label{sec:speed}
-A wrong speed predicts the wrong blur, which DPIR cannot fit without breaking its prior. We therefore
-reconstruct a band of 64 rings at 21 candidate speeds spanning $\pm20\%$ of the commanded speed, take
-the data residual $\|\mathbf{A}(\omega)\hat{\mathbf{x}}(\omega)-\mathbf{b}\|_2$ at each, and refine the
-minimum with a parabola through its neighbours. The same residual checks the direction of rotation:
-if $-\omega$ fits better than $+\omega$ by a margin of 10\%, the sign is flipped; under steady light,
-whose blur barely depends on the direction, it is not checked.
+A wrong speed predicts the wrong blur, which DPIR cannot fit without breaking its prior. In
+simulation we reconstruct a band of 64 rings at 21 candidate speeds within $\pm20\%$ of the commanded
+speed and keep the one with the smallest data residual
+$\|\mathbf{A}(\omega)\hat{\mathbf{x}}(\omega)-\mathbf{b}\|_2$, refined by a parabola. The same residual
+checks the direction: if $-\omega$ fits 10\% better than $+\omega$, the sign is flipped (not under
+steady light, whose blur barely depends on it).
 
-On the rig this residual read 1 to 13\% low, so the rig results measure the blur directly instead: the
-still of the stopped fan, blurred at a candidate speed by the capture's code and monitor, is matched to
-the whole capture, every blade on every ring, and the best speed is kept from a 1\% grid within
-$\pm25\%$ of the command, then a 0.05\% grid, refined by a parabola. It needs the still but not the
-speed. Matched against each of the three stills in turn, one capture's estimate moved by up to 1.2\% at
-5 and \SI{8}{rpm} and 3.6\% at \SI{3}{rpm}, where the blur is shortest.
+On the rig this residual read 1 to 13\% low, so there we match the blur directly: the still of the
+stopped fan, blurred at a candidate speed by the capture's code and monitor, is matched to the whole
+capture on a 1\% and then a 0.05\% grid within $\pm25\%$, refined by a parabola. Given a different
+one of the three stills, an estimate moved by up to 1.2\% at 5 and \SI{8}{rpm} and 3.6\% at
+\SI{3}{rpm}, where the blur is shortest.
 
 \subsection{Calibration}
 \label{sec:calibration}
-The pipeline needs the hub centre, the radii of the blades and the arc they occupy. We find all
-three from three photographs of the stopped fan, turned by a known number of motor steps between
-them (\SI{2038}{} full steps per revolution). For each pair of photographs we search for the centre
-about which one rotates into the other, first on a coarse grid and then by Nelder-Mead; the median
-over the pairs is the hub, and a spread above \SI{1}{px} warns that the camera moved. On the rig the
-pairs agreed to within \SI{0.6}{px} (\SI{2.0}{px} in an earlier session). The pixel-wise minimum of
-the stills is what never moves (mount, bolts, wires); a scaled copy, fitted outside the blade circle,
-is subtracted from every capture and from the reference, so only the blades are deblurred and scored.
-Without it, the search for the blade locked onto wires and glare and skipped 4 of our first 11 captures. The code
-timing comes from each capture's log, and a photograph of the stopped fan in the same setup is the
-reference for image quality. Its three blades look alike, so before the reference is turned onto the
-deblurred blade, the blade is picked from the whole capture: the reference, blurred by the capture's
-own code and motion, is matched to every blade of the capture at once. On 35 coded captures this picked
-the blade whose letter the deblur shows every time, where matching the deblurred blade alone picked a
-look-alike 13 times.
+The pipeline needs the hub centre and the radii and arc of the blades. We find them from three
+stills of the stopped fan, 400 motor steps apart (\SI{2038}{} full steps per revolution): for each
+pair we search for the centre about which one rotates into the other (a coarse grid, then
+Nelder-Mead) and take the median, and a spread above \SI{1}{px} warns that the camera moved. On the
+rig the pairs agreed to within \SI{0.6}{px}. The pixel-wise minimum of the stills is what never moves
+(mount, bolts, wires); a scaled copy is subtracted from every capture and from the reference, so only
+the blades are deblurred and scored. Without it the blade search locked onto wires and glare and
+skipped 4 of our first 11 captures. The code timing comes from each capture's log, and the third
+still is the reference for image quality. Its three blades look alike, so the blade is first picked
+from the whole capture: the reference, blurred by the capture's code and motion, is matched to every
+blade at once. On 35 coded captures this picked the blade whose letter the deblur shows every time;
+matching the deblurred blade alone picked a look-alike 13 times.
 
-\paragraph{Monitor.} The model assumed a screen that switches at once. To measure the real one we put
-a white dot beyond a blade tip on black tape and photographed it at \SI{3}{rpm} under the code: the
-dot's streak is the light over time. Over five captures, a lag that brightens with a \SI{44}{ms} time
-constant and dims at once explains the streaks with a third of the misfit of an ideal screen, and
-better than one lag both ways; a one-bit flash then peaks at 78\% of white. The pipeline models
-$L(t)$ this way, starting from black (the screen is black before the code). Deblurring with it
-instead of an ideal screen improved 40 of 46 real global shutter captures (all at 3 and \SI{5}{rpm},
-5 of 11 at \SI{8}{rpm}), by 0.3 to \SI{0.8}{dB} on average per set, and rise times from 30 to
-\SI{55}{ms} gave the same result within \SI{0.2}{dB}.
+\paragraph{Monitor.} To measure the screen, we photographed a white dot beyond a blade tip at
+\SI{3}{rpm} under the code, so its streak traces the light over time. Over five captures, a lag that
+brightens with a \SI{44}{ms} time constant and dims at once fits the streaks with a third of an ideal
+screen's misfit, and better than one lag both ways; a one-bit flash then peaks at 78\% of white.
+Modelling $L(t)$ this way, from black, improved 40 of 46 global shutter captures (all at 3 and
+\SI{5}{rpm}, 5 of 11 at \SI{8}{rpm}) by 0.3 to \SI{0.8}{dB} on average per set, and rise times of 30
+to \SI{55}{ms} agreed within \SI{0.2}{dB}.
 
 \subsection{Experimental protocol}
 \label{sec:protocol}
@@ -152,20 +146,17 @@ instead of an ideal screen improved 40 of 46 real global shutter captures (all a
   \end{tabular}
 \end{table}
 
-\paragraph{Simulation.} Before the rig existed we validated the pipeline on renders. Blender renders
-a single \SI{50}{mm} blade filling the frame height, hub above the frame, on a black background, at
-$728\times544$~px in steps of \SI{8.3}{ms} while it turns at \SI{0.35}{rpm}; one scene carries
-letters, a harder one a photograph plus letters. We apply the code and each line's exposure window
-in software, then a sensor model with Poisson shot noise, a \SI{10000}{e^-} full well, \SI{3}{e^-}
-read noise and a 10-bit converter, with steady light filling 70\% of the well on white. The code is
-the 52-bit code of~\cite{raskar2006coded} at one bit per refresh (\SI{0.87}{s}). The short exposure
-baseline is a single \SI{16.7}{ms} bit with $16\times$ analogue gain.
+\paragraph{Simulation.} Before the rig existed, Blender rendered a single \SI{50}{mm} blade
+(letters, or a photograph plus letters) filling the frame height on black, at $728\times544$~px every
+\SI{8.3}{ms}, turning at \SI{0.35}{rpm}. We apply the code and each line's exposure window in
+software, then Poisson shot noise, a \SI{10000}{e^-} full well, \SI{3}{e^-} read noise and a 10-bit
+converter, with steady light filling 70\% of the well on white. The code is the 52-bit code
+of~\cite{raskar2006coded} at one bit per refresh (\SI{0.87}{s}); the short exposure is one
+\SI{16.7}{ms} bit at $16\times$ analogue gain.
 
-\paragraph{Rig.} For each speed (\cref{tab:params}) and each camera: 10 to 12 coded captures and 9
-or 10 under steady light of the same length, after three stills of the stopped fan 400 steps apart,
-the third also the reference. Ground truth speed from the step rate. Dark room. The rolling shutter
-exposes for the code plus its readout plus \SI{0.25}{s}, so every row sees the whole code and per row
-and per frame coincide (\cref{fig:timing}b). No short exposures were taken.
+\paragraph{Rig.} For each speed and camera (\cref{tab:params}): 10 to 12 coded captures and 9 or 10
+under steady light of the same length, after three stills of the stopped fan 400 steps apart, in a
+dark room. The ground truth speed is the step rate. No short exposures were taken.
 
 \paragraph{Letters read.} The card is cut from the turned reference and the same square from the
 deblurred image, turned so the blade points down, thresholded (Otsu), reduced to the biggest ink blob

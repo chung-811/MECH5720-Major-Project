@@ -3,17 +3,13 @@
 \label{sec:conclusion}
 
 We built a coded illumination rig that turns an ordinary camera and monitor into a flutter shutter
-camera, and a pipeline that reverses the blur and recovers the speed of a spinning fan from a
-single photograph. In simulation the reconstruction reaches \psnrGsTex~dB on a textured blade, per-row
-rolling shutter matches the global shutter to within \rowsMaxMeanGapA~dB on average, and the speed is recovered to
-within \speedErrTex\%. On the rig, the monitor shows the code to within \SI{1}{ms} for
-\realWithinOneMs~of \realBits~bits, and with the global shutter at 3 to \SI{8}{rpm} coded light
-deblurs \rigGapMin~to \rigGapMax~dB better than steady light (\rigRsGapMin~to \rigRsGapMax~dB on the
-rolling shutter). At \SI{8}{rpm}, OCR reads \rigReadCodedEight\% of the letters after coded light and
-\rigReadSteadyEight\% after steady light, and the speed from the blur is within 5\% on
-\rigSpeedWithinCoded~of \rigSpeedAllCoded~and \rigSpeedWithinRsCoded~of \rigSpeedAllRsCoded~coded
-captures. Per row could not be told apart from per frame on the rig, because the capture software pads
-the exposure; an unpadded rolling shutter session would test criterion 1 directly.
+camera, and a pipeline that reverses the blur and measures the speed of a spinning fan from one
+photograph. On the rig, coded light deblurred \rigGapMin~to \rigGapMax~dB (global shutter) and
+\rigRsGapMin~to \rigRsGapMax~dB (rolling) better than steady light; at \SI{8}{rpm} a character reader
+read \rigReadCodedEight\% of the letters after it against \rigReadSteadyEight\% after steady light; and
+the blur gave the speed within 5\% on \rigSpeedWithinCoded~of \rigSpeedAllCoded~and \rigSpeedWithinRsCoded~of
+\rigSpeedAllRsCoded~coded captures. Per row could not be tested against per frame on the rig, as the
+exposure was padded; in simulation per row came within \rowsMaxMeanGapA~dB of the global shutter.
 
 With two more months we would replace the monitor with an LED, whose microsecond switching would
 allow codes hundreds of bits long; design codes for the rolling shutter, so that its row timing adds
