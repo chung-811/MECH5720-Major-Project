@@ -89,6 +89,9 @@ Textured blade unless stated, DPIR, one noise draw per case (`rows.py`, `legibil
 
 What each thing going wrong costs (one at a time, against 38.1 dB, 25 px of blur):
 
+This table is from an earlier pipeline. `faults.py` redoes the speed and bit rows with the current one (DPIR,
+textured blade, 25 px, against 36.9 dB): speed off 1 / 2 / 5% costs 0.7 / 2.4 / 8.0 dB, one bit shown twice 5.2 dB.
+
 | | cost |
 | --- | --- |
 | speed off 1 / 2 / 5% (use `--find-speed` if unsure) | -0.8 / -2.7 / -8.5 dB |
