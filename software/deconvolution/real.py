@@ -72,10 +72,13 @@ def log_timing(path):
     if "code" not in d:
         return {}
     try:
-        t0 = d["readout_s"] + (d["t0_monotonic_ns"] - d["frame_boundary_monotonic_ns"]) / 1e9
+        # the sensor's own readout when the log has it; older logs only have the GUI's readout field, which
+        # also sets the exposure and so can be 0 while the sensor still takes its full readout
+        readout = d.get("sensor_readout_s") or d["readout_s"]
+        t0 = readout + (d["t0_monotonic_ns"] - d["frame_boundary_monotonic_ns"]) / 1e9
     except KeyError as err:
         raise SystemExit(f"{path}: no {err} in it, so not a complete run log from the capture GUI")
-    return dict(readout_s=d["readout_s"], t0=t0, late_bits=d.get("late_bits", 0), aborted=d.get("aborted", False))
+    return dict(readout_s=readout, t0=t0, late_bits=d.get("late_bits", 0), aborted=d.get("aborted", False))
 
 
 def mean_frames(paths):

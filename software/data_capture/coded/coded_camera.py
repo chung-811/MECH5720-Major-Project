@@ -21,6 +21,8 @@ starts the next exposure has already been running for about one readout
 time. On a rolling shutter (OV5647) that is also the delay between the top
 and bottom rows starting. Adding readout_s means every row (rolling) or the
 whole frame (global) sees the full code, with black before and after it.
+readout_s here is only the GUI setting; the log also records the sensor's
+own readout as sensor_readout_s, which the deblur uses for the timing.
 padding_s absorbs scheduling jitter. Keep the room dark: anything lit
 during the padding adds to the image.
 """
@@ -350,6 +352,7 @@ def run_coded_capture(picam2, code, camera, info, shutter, manual_controls):
         "code": {k: v for k, v in code.items() if k != "warnings"},
         "warnings": code["warnings"],
         "readout_s": readout_s,
+        "sensor_readout_s": info.get("readout_s"),   # the sensor's own (1 / max fps), whatever readout_s was set to
         "padding_s": padding_s,
         "requested_exposure_us": exposure_us,
         "sync_exposure_us": sync_exposure_us,

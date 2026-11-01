@@ -182,6 +182,16 @@ def test_run_log_from_the_capture_gui(tmp_path):
     assert timing["late_bits"] == 0 and timing["aborted"] is False
 
 
+def test_run_log_timing_uses_the_sensor_readout_not_the_gui_setting(tmp_path):
+    """with the GUI's readout set to 0 (exposure = code) the sensor still reads out in 64 ms"""
+    log = tmp_path / "coded_rs.json"
+    log.write_text(json.dumps(dict(code=dict(bits=[1, 0, 1, 1], bit_duration_s=0.0625), actual_exposure_us=1066486,
+                                   readout_s=0.0, sensor_readout_s=0.064, frame_boundary_monotonic_ns=1663663357489,
+                                   t0_monotonic_ns=1663685013479)))
+    timing = real.log_timing(log)
+    assert timing["readout_s"] == 0.064 and abs(timing["t0"] - (0.064 + 0.02165599)) < 1e-9
+
+
 DNG = Path(__file__).parents[2] / "illumination/data/coded/coded_20261019_220955.dng"
 
 
