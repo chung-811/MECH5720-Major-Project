@@ -138,12 +138,12 @@ grey band is the ±5% target.</td>
 </tr>
 <tr>
 <td><img src="docs/img/rows_axis0.png" alt="Simulated PSNR by band of sensor lines for global shutter and rolling shutter per row and per frame."></td>
-<td><img src="docs/img/qualitative.png" alt="Simulation: coded capture, deblurred at 38.4 dB, and the stopped fan."></td>
+<td><img src="docs/img/sim_blade.png" alt="Simulation: coded capture, deblurred at 38.4 dB, and the stopped fan."></td>
 </tr>
 <tr>
 <td><b>Criterion 1 in simulation</b>, unpadded exposure. Per row (solid) tracks the global shutter
 (black); per frame (dashed) degrades away from the rows its timing was right for.</td>
-<td><b>Simulation</b> (Blender): a textured blade deblurred to 38.4 dB against the stopped fan.</td>
+<td><b>Simulation</b> (Blender): a photo printed on the blade, global shutter, deblurred by DPIR to 38.4 dB against the stopped fan.</td>
 </tr>
 </table>
 
