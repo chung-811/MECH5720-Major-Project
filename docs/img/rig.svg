@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#57606a"/>
+    </marker>
+    <marker id="spin" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#ffd33d"/>
+    </marker>
+    <linearGradient id="beam" x1="1" x2="0">
+      <stop offset="0" stop-color="#ffd33d" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#ffd33d" stop-opacity="0.08"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="900" height="430" rx="14" fill="#ffffff"/>
+
+  <!-- light: monitor onto the fan, fan into the camera -->
+  <polygon points="640,75 640,215 220,200 220,110" fill="url(#beam)"/>
+  <polygon points="220,212 220,250 440,272 440,258" fill="#0969da" fill-opacity="0.14"/>
+
+  <!-- fan on black backing -->
+  <text x="140" y="24" text-anchor="middle" font-size="17" font-weight="600" fill="#24292f">Fan with letter cards</text>
+  <text x="140" y="42" text-anchor="middle" font-size="12" fill="#57606a">matte black backing, dark room</text>
+  <rect x="60" y="52" width="160" height="228" rx="6" fill="#0d1117"/>
+  <g transform="translate(140,165)">
+    <g fill="#e6e6e6">
+      <rect x="-9" y="-86" width="18" height="68" rx="4"/>
+      <rect x="-9" y="-86" width="18" height="68" rx="4" transform="rotate(120)"/>
+      <rect x="-9" y="-86" width="18" height="68" rx="4" transform="rotate(240)"/>
+    </g>
+    <g font-size="15" font-weight="700" fill="#24292f" text-anchor="middle">
+      <text x="0" y="-58">A</text>
+      <text x="0" y="-58" transform="rotate(120)">B</text>
+      <text x="0" y="-58" transform="rotate(240)">C</text>
+    </g>
+    <circle r="15" fill="#8c959f"/>
+    <path d="M 37.5 -65 A 75 75 0 0 1 70.5 -25.7" fill="none" stroke="#ffd33d" stroke-width="3" marker-end="url(#spin)"/>
+  </g>
+
+  <!-- camera -->
+  <text x="485" y="234" text-anchor="middle" font-size="17" font-weight="600" fill="#24292f">Camera</text>
+  <rect x="440" y="242" width="90" height="50" rx="8" fill="#24292f"/>
+  <circle cx="440" cy="267" r="17" fill="#57606a" stroke="#24292f" stroke-width="6"/>
+  <text x="425" y="312" text-anchor="middle" font-size="12" fill="#57606a">global: Sony IMX296</text>
+  <text x="425" y="327" text-anchor="middle" font-size="12" fill="#57606a">rolling: OV5647</text>
+  <text x="425" y="342" text-anchor="middle" font-size="12" fill="#57606a">one 1.1 s exposure</text>
+
+  <!-- monitor -->
+  <text x="705" y="50" text-anchor="middle" font-size="17" font-weight="600" fill="#24292f">Monitor</text>
+  <rect x="640" y="60" width="130" height="170" rx="8" fill="#24292f"/>
+  <rect x="652" y="72" width="106" height="146" rx="3" fill="#f6f8fa"/>
+  <rect x="698" y="230" width="14" height="22" fill="#24292f"/>
+  <rect x="670" y="252" width="70" height="8" rx="3" fill="#24292f"/>
+  <text x="705" y="282" text-anchor="middle" font-size="12" fill="#57606a">flashes a 16-bit code</text>
+  <g transform="translate(640,292)">
+    <rect x="0" y="0" width="130" height="14" fill="#d0d7de"/>
+    <rect x="0" y="0" width="16" height="14" fill="#24292f"/>
+    <rect x="24" y="0" width="16" height="14" fill="#24292f"/>
+    <rect x="48" y="0" width="8" height="14" fill="#24292f"/>
+    <rect x="72" y="0" width="24" height="14" fill="#24292f"/>
+    <rect x="106" y="0" width="8" height="14" fill="#24292f"/>
+  </g>
+  <text x="705" y="324" text-anchor="middle" font-size="11" fill="#57606a">66.7 ms per bit</text>
+
+  <!-- controllers -->
+  <rect x="60" y="356" width="160" height="54" rx="8" fill="#ddf4ff" stroke="#0969da"/>
+  <text x="140" y="379" text-anchor="middle" font-size="14" font-weight="600" fill="#0969da">Arduino Uno</text>
+  <text x="140" y="398" text-anchor="middle" font-size="12" fill="#0969da">drives a 28BYJ-48 stepper</text>
+
+  <rect x="260" y="356" width="150" height="54" rx="8" fill="#fbefff" stroke="#8250df"/>
+  <text x="335" y="379" text-anchor="middle" font-size="14" font-weight="600" fill="#8250df">Laptop</text>
+  <text x="335" y="398" text-anchor="middle" font-size="12" fill="#8250df">deblur + speed</text>
+
+  <rect x="470" y="356" width="170" height="54" rx="8" fill="#dafbe1" stroke="#1a7f37"/>
+  <text x="555" y="379" text-anchor="middle" font-size="14" font-weight="600" fill="#1a7f37">Raspberry Pi</text>
+  <text x="555" y="398" text-anchor="middle" font-size="12" fill="#1a7f37">code + exposure in sync</text>
+
+  <!-- wiring -->
+  <g fill="none" stroke="#57606a" stroke-width="1.6" stroke-dasharray="5 4">
+    <path d="M140,354 L140,284" marker-end="url(#arr)"/>
+    <path d="M412,383 L468,383" marker-end="url(#arr)" marker-start="url(#arr)"/>
+    <path d="M520,354 L492,297" marker-end="url(#arr)"/>
+    <path d="M642,383 L820,383 L820,145 L774,145" marker-end="url(#arr)"/>
+  </g>
+  <text x="148" y="330" font-size="11" fill="#57606a">step rate = true speed</text>
+  <text x="440" y="374" text-anchor="middle" font-size="11" fill="#57606a">raw</text>
+  <text x="828" y="270" font-size="11" fill="#57606a">HDMI</text>
+</svg>
