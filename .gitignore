@@ -5,6 +5,6 @@ renders/
 out/
 .DS_Store
 ~$*
-report/
 imgui.ini
 data/
+!report/figures/data/

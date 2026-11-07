@@ -1,0 +1,22 @@
+% Brief: what didn't work and why, especially fundamental limits.
+\section{Limitations and Pitfalls}
+\label{sec:limitations}
+
+\paragraph{The subject must turn at a known, steady speed.}
+Our first captures used a CD spun by hand (\cref{fig:real}a). The speed changed during each
+exposure, so no single blur explained the image and none could be deblurred. In simulation, a speed error of 1, 2 and 5\% costs \faultSpeedOne, \faultSpeedTwo~and \SI{\faultSpeedFive}{dB};
+the motor sketch's nominal 2048 steps per revolution, against the true 2038, makes the fan 0.5\% faster than the deblur assumes. The speed search needs a guess within 20\%, and one bit repeated in place of the next costs \SI{\faultBit}{dB}.
+
+\paragraph{The background must be dark.}
+Anything bright behind the blades is hidden and uncovered as they pass, which the model does not
+include, so the rig uses a matte black backing in a dark room.
+
+\paragraph{The monitor is too slow to test per row on the rig.}
+It brightens with a \SI{44}{ms} lag (\cref{sec:calibration}): a one-refresh (\SI{16.7}{ms}) bit reaches only 32\% of white, and a one-bit flash of our code gives about half its designed light. We therefore used four refreshes per bit, but a \SI{66.7}{ms} bit outlasts the rolling shutter's \SI{64}{ms} readout, so per frame is never more than half a bit wrong and, even unpadded, the rig cannot show it failing. The fix is a readout spanning several bits: a transistor-switched LED (bits of 1 to \SI{5}{ms}, 13 to 64 per readout), or, keeping the monitor, a one-refresh code designed with the measured lag (3.8 bits per readout, as simulated), trading light for timing.
+
+\paragraph{Found in the lab.} The fan's three blades look alike: matching the deblurred blade alone
+scored 13 of 35 captures against the wrong card (\cref{sec:calibration}), and where the letters are
+small next to the clutter (our first session) even the whole-capture match is close to a guess. Zeroing the capture software's readout setting also zeros the readout in the run log, which the pipeline reads, so the code start must then be set by hand. On the rolling shutter
+the measured monitor lag did not help: an ideal screen scored 0.15 to \SI{0.6}{dB} higher on three
+captures. The speed from the blur needs a still and reads steady light 4 to 6\% low on the global shutter. No short exposures were taken, so
+that baseline exists only in simulation. The stills must come first: one session's stills, taken after its captures, disagreed by \SI{2.2}{px} instead of under \SI{1}{px}, and its scores split by blade position from 14 to \SI{28}{dB}. 

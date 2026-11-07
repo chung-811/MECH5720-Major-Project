@@ -26,3 +26,8 @@ report. It was written by
 
 With the padded exposure, the rolling shutter per-row and per-frame rows agree to 0.01 dB; the figures
 use the per-row rows.
+
+`rig_unpadded.csv` has the same columns for the second rolling shutter session (1 Nov), with the
+exposure equal to the code instead of padded. Per row and per frame agree there to 0.17 dB on the 32 coded
+captures, because the 64 ms readout is shorter than one bit. Its raw captures are
+`rs_unpadded_2026-11-01.zip` in the dataset release.

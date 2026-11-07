@@ -1,0 +1,183 @@
+%% main.tex
+%% Created by Ayan Chakrabarti from the IEEE bare_jrnl_compsoc.tex file.
+%% Modified by Ioannis Gkioulekas.
+%%
+%% bare_jrnl_compsoc.tex
+%% V1.4b
+%% 2015/08/26
+%% by Michael Shell
+%% See:
+%% http://www.michaelshell.org/
+%% for current contact information.
+%%
+%% This is a skeleton file demonstrating the use of IEEEtran.cls
+%% (requires IEEEtran.cls version 1.8b or later) with an IEEE
+%% Computer Society journal paper.
+%%
+%% Support sites:
+%% http://www.michaelshell.org/tex/ieeetran/
+%% http://www.ctan.org/pkg/ieeetran
+%% and
+%% http://www.ieee.org/
+
+%%*************************************************************************
+%% Legal Notice:
+%% This code is offered as-is without any warranty either expressed or
+%% implied; without even the implied warranty of MERCHANTABILITY or
+%% FITNESS FOR A PARTICULAR PURPOSE! 
+%% User assumes all risk.
+%% In no event shall the IEEE or any contributor to this code be liable for
+%% any damages or losses, including, but not limited to, incidental,
+%% consequential, or any other damages, resulting from the use or misuse
+%% of any information contained here.
+%%
+%% All comments are the opinions of their respective authors and are not
+%% necessarily endorsed by the IEEE.
+%%
+%% This work is distributed under the LaTeX Project Public License (LPPL)
+%% ( http://www.latex-project.org/ ) version 1.3, and may be freely used,
+%% distributed and modified. A copy of the LPPL, version 1.3, is included
+%% in the base LaTeX documentation of all distributions of LaTeX released
+%% 2003/12/01 or later.
+%% Retain all contribution notices and credits.
+%% ** Modified files should be clearly indicated as such, including  **
+%% ** renaming them and changing author support contact information. **
+%%*************************************************************************
+
+
+\documentclass[10pt,journal,compsoc]{IEEEtran}
+\newif\ifpeerreview
+
+%%% Important: for camera ready submissions, replace the following line
+%%% with \peerreviewfalse
+\peerreviewfalse
+
+
+\usepackage[nocompress]{cite}
+\usepackage{url}
+\usepackage{amsmath,amssymb,graphicx}
+
+\usepackage{lipsum} % Only used to generate random text.
+
+
+\usepackage[switch]{lineno}
+
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage[capitalise]{cleveref}
+
+% Run-in headings (\paragraph): unnumbered and bold. The class numbers them (2.0.0.1) and adds a colon,
+% which doubled our own full stops ("Coded exposure.:"); our titles end in their own punctuation.
+\setcounter{secnumdepth}{3}
+\makeatletter
+\def\@IEEEsectpunct{\ }
+\def\paragraph{\@startsection{paragraph}{4}{2\parindent}{-0ex plus -0.1ex minus -0.1ex}{0ex}{\normalfont\normalsize\bfseries}}
+\makeatother
+
+% Writing aids. Set \showtodostrue to \showtodosfalse before submitting: every TODO vanishes,
+% and every \placeholder figure still shows as a box, so nothing unfinished can slip through.
+\newif\ifshowtodos \showtodostrue
+\newcommand{\TODO}[1]{\ifshowtodos{\color{red}\textbf{[TODO:} #1\textbf{]}}\fi}
+\newcommand{\placeholder}[2][\linewidth]{%   \placeholder[width]{what goes here}
+  \fbox{\parbox[c][0.55#1][c]{\dimexpr#1-2\fboxsep-2\fboxrule}{\centering\small\color{gray}#2}}}
+\newcommand{\X}{\textcolor{red}{\textbf{XX}}}  % a number still to measure
+
+\graphicspath{{figures/}}
+% Let more floats share a page, so figures stay near their first mention instead of queueing
+% behind each other until after the references.
+\renewcommand{\topfraction}{0.9}\renewcommand{\dbltopfraction}{0.9}
+\renewcommand{\bottomfraction}{0.8}\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.8}\renewcommand{\dblfloatpagefraction}{0.8}
+\setcounter{topnumber}{3}\setcounter{bottomnumber}{2}\setcounter{totalnumber}{5}\setcounter{dbltopnumber}{2}
+% Every measured or simulated number in the text is a macro from this file, written by
+% figures/make_figures.py. A missing macro stops the build, so a stale number cannot slip in.
+\input{figures/numbers}
+
+
+% Insert your paper ID and information below
+\newcommand{\paperID}{XXXX}
+
+% Enter your paper title below
+\title{Coded Illumination for Motion Deblurring:\\
+  Global Shutter versus Rolling Shutter}
+
+% Enter your author information before
+% Note this is only necessary for the camera review. Submissions are anonymized.
+\author{
+  Jack Thompson \quad Oliver Turner \quad Krish Singh \quad Daniel Chung \quad Ben Ritchie\\
+  {\small Code and data: \url{https://github.com/chung-811/mech5720-2026-codedillumination}}   
+}
+
+
+\begin{document}
+
+\IEEEtitleabstractindextext{%
+\begin{abstract}
+\input{sections/abstract.tex}
+\end{abstract}
+}
+
+
+% Make Title
+\ifpeerreview
+\linenumbers \linenumbersep 15pt\relax 
+\author{Paper ID \paperID\IEEEcompsocitemizethanks{\IEEEcompsocthanksitem This paper is under review for ICCP 2026 and the PAMI special issue on computational photography. Do not distribute.}}
+\markboth{Anonymous ICCP 2026 submission ID \paperID}%
+{}
+\fi
+\maketitle
+
+
+
+% The first section title should be wrapped inside a \IEEEraisesectionheading as follows.
+\IEEEraisesectionheading{
+  \section{Introduction}\label{sec:intro}
+}
+\IEEEPARstart{P}{HOTOGRAPHING} \input{sections/introduction.tex}
+
+
+\input{sections/literature.tex}
+\input{sections/method}
+\input{sections/results}
+\input{sections/limitations}
+\input{sections/conclusion}
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+
+
+
+\ifpeerreview \else
+%%%% For the camera ready version, please fill out this
+%%%% biography. Your camera ready should be within a 12 page limit
+%%%% including acknowledgments, references and biography.
+
+% If you have an EPS/PDF photo (graphicx package needed) extra braces are
+% needed around the contents of the optional argument to biography to prevent
+% the LaTeX parser from getting confused when it sees the complicated
+% \includegraphics command within an optional argument. (You could
+% create your own custom macro containing the \includegraphics command
+% to make things simpler here.)
+% \begin{IEEEbiography}[{\includegraphics[width=1in,height=1.25in,clip,keepaspectratio]{mshell}}]{Michael Shell}
+% or if you just want to reserve a space for a photo:
+
+% insert where needed to balance the two columns on the last page with
+% biographies
+%\newpage
+
+% if you will not have a photo at all:
+
+% You can push biographies down or up by placing
+% a \vfill before or after them. The appropriate
+% use of \vfill depends on what kind of text is
+% on the last page and whether or not the columns
+% are being equalized.
+%\vfill
+
+\fi
+
+\end{document}
+
+
