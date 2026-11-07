@@ -1,6 +1,6 @@
 <div align="center">
 
-# Flutter Shutter by Coded Illumination
+# MECH5720 - 2026 - Flutter Shutter by Coded Illumination
 
 **Reversible motion blur with an ordinary camera and a computer monitor.**
 <br>Global shutter vs rolling shutter, per-frame vs per-row deconvolution.
