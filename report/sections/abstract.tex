@@ -1,0 +1,16 @@
+% Brief: whole report, no jargon, avoid acronyms, NO citations, include specific key numbers.
+Photographs of moving objects blur, and a shorter exposure trades the blur for darkness and noise.
+We avoid this trade-off without modifying the camera: a computer monitor beside it flashes a designed
+on/off pattern during one long exposure, which makes the blur reversible. The subject is a fan with
+letters on its blades, driven at a known speed. We compare a camera that exposes every row at once
+with one that exposes row by row. In simulation, our reconstruction recovers a textured blade to
+\psnrGsTex~dB against the stopped fan, correcting row by row matches the all-at-once camera to within
+\rowsMaxMeanGapA~dB, and the fan's speed is recovered from a single photograph to within
+\speedErrTex\%. In a timing test on the rig, the monitor showed the pattern to within one millisecond for
+\realWithinOneMs~of \realBits~flashes. At 3 to 8 revolutions per minute, reconstructions from the
+all-at-once camera score \rigGapMin~to \rigGapMax~dB higher than steady light; the row-by-row camera
+scores lower but keeps a \rigRsGapMin~to \rigRsGapMax~dB lead. At 8 revolutions per minute, a character
+reader reads \rigReadCodedEight\% of the letters after reconstruction with coded light versus
+\rigReadSteadyEight\% with steady light, and the speed measured from the blur is within 5\% of the set
+speed on \rigSpeedWithinCoded~of \rigSpeedAllCoded~and \rigSpeedWithinRsCoded~of \rigSpeedAllRsCoded~coded
+photographs from the two cameras.

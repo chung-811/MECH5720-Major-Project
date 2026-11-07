@@ -1,0 +1,26 @@
+% Brief: very brief; academic papers only (no websites); say what we borrow or adapt.
+% Keys are in refs.bib. Add a paper there before citing it.
+\section{Related Work}
+\label{sec:literature}
+
+\paragraph{Coded exposure.}
+Raskar et al.\ opened and closed a camera's shutter in a binary code during one exposure, turning
+motion blur into an invertible operation~\cite{raskar2006coded}. Agrawal and Xu then chose codes
+for both invertibility and for estimating the blur from the image~\cite{agrawal2009coded}. We borrow
+the principle and the 52-bit code from Raskar et al.~\cite{raskar2006coded} for our simulations, but code the light instead of the
+shutter; on the rig the monitor's slow response calls for fewer, longer bits (\cref{sec:limitations}). 
+
+\paragraph{Other ways to capture motion.}
+Motion-invariant photography moves the camera so that the blur is the same for every
+speed~\cite{levin2008motion}, and velocity-dependent codes adapt the code to the expected
+speed~\cite{mccloskey2010velocity}. Both need a moving camera or prior knowledge of the speed; our
+rig needs neither, and estimates the speed afterwards.
+
+\paragraph{Rolling shutter.}
+Reading a sensor row by row distorts moving objects~\cite{liang2008rolling}, and coded rolling
+shutter photography exploits the row timing deliberately~\cite{gu2010coded}. We instead model each
+row's own exposure window in the blur operator.
+
+\paragraph{Reconstruction.}
+We use Tikhonov-regularised least squares as a transparent baseline, and plug-and-play restoration
+with a learned denoiser (DPIR)~\cite{zhang2022plug} as the main solver.

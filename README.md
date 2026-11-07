@@ -99,6 +99,10 @@ flowchart LR
 
 <p align="center"><img src="docs/img/rig.svg" width="820" alt="Rig layout: a Raspberry Pi drives the monitor and the camera; an Arduino drives the stepper fan; a laptop deblurs."></p>
 
+<p align="center"><img src="docs/img/rig_photo.jpg" width="640" alt="Photo of the rig: the monitor and the camera on the Raspberry Pi face the fan, which turns on a stepper motor in front of a matte black background; the Arduino drives the motor."></p>
+<p align="center"><sub>The rig as built: monitor, camera and Raspberry Pi on the left, the fan on its stepper motor
+in front of the matte black background, the Arduino below. The camera is 20 cm from the fan.</sub></p>
+
 | Part | What it does |
 | --- | --- |
 | **Monitor** on the Raspberry Pi | flashes black/white, one code bit per four 60 Hz refreshes (66.7 ms) |
@@ -119,7 +123,7 @@ back on both cameras; steady light of the same length does not.</sub></p>
 
 | Criterion | Target | Rig (real captures) | Simulation |
 | --- | --- | --- | --- |
-| **1. Per-row vs global**, image quality by band of rows | per row within 1 dB of global shutter | not testable: padding makes every row see the whole code, so per row and per frame coincide | per row within **0.3 dB** of global on average (worst band 1.2 dB); per frame drops up to 14 dB |
+| **1. Per-row vs global**, image quality by band of rows | per row within 1 dB of global shutter | missed: by band the rolling shutter camera is 1.9 to 8.1 dB below the global shutter camera (5.6 dB on average), but that compares two cameras, not two corrections. Per row and per frame agree to 0.01 dB (padded) and 0.17 dB (exposure equal to the code), as the 64 ms readout is shorter than one 66.7 ms bit | per row within **0.3 dB** of global on average (worst band 1.2 dB); per frame drops up to 14 dB |
 | **2. Legibility**, letters read by OCR | ≥ 90% coded where steady < 50% | ✅ global, 8 rpm: **91%** coded vs **0%** steady<br/>rolling, 8 rpm: 60% vs 20% | |
 | **3. Blind speed**, from one photo | within 5% | ✅ **34 / 35** global and **30 / 30** rolling coded captures within 5% | within **0.2%** |
 | **Code timing**, does the monitor show the code on time | | **298 / 304** flashes within 1 ms of schedule | |
@@ -140,12 +144,12 @@ grey band is the ±5% target.</td>
 </tr>
 <tr>
 <td><img src="docs/img/rows_axis0.png" alt="Simulated PSNR by band of sensor lines for global shutter and rolling shutter per row and per frame."></td>
-<td><img src="docs/img/sim_blade.png" alt="Simulation: coded capture, deblurred at 38.4 dB, and the stopped fan."></td>
+<td><img src="docs/img/sim_blade.png" alt="Simulation: coded capture, deblurred at 36.9 dB, and the stopped fan."></td>
 </tr>
 <tr>
 <td><b>Criterion 1 in simulation</b>, unpadded exposure. Per row (solid) tracks the global shutter
 (black); per frame (dashed) degrades away from the rows its timing was right for.</td>
-<td><b>Simulation</b> (Blender): a photo printed on the blade, global shutter, deblurred by DPIR to 38.4 dB against the stopped fan.</td>
+<td><b>Simulation</b> (Blender): a photo printed on the blade, global shutter, deblurred by DPIR to 36.9 dB against the stopped fan.</td>
 </tr>
 </table>
 
@@ -159,8 +163,10 @@ grey band is the ±5% target.</td>
   pass, which the model does not include.
 - **The three blades look alike.** Matching the deblurred blade alone picked the wrong card 13 of 35
   times; matching the whole capture picked the right one every time.
-- **Padding the rolling shutter** makes it work, but means the rig cannot show per-frame failing;
-  that comparison is simulation only.
+- **Padding the rolling shutter** makes every row see the whole code. Even unpadded, per frame cannot
+  fail on our rig: the 64 ms readout is shorter than one 66.7 ms bit, so its timing is at most half a bit
+  off (per row and per frame agreed to 0.17 dB). Showing per frame failing needs a readout several bits
+  long, so that comparison is simulation only.
 
 With more time: an LED instead of a monitor (microsecond switching, codes hundreds of bits long),
 codes designed for the rolling shutter, and everyday scenes where motion must be estimated per object.
@@ -211,9 +217,21 @@ uv run python deblur.py ../../data/gs_2026-10-28/gs_8rpm --stills ../../data/gs_
 | `gs_2026-10-28.zip` | global shutter, 3, 5 and 8 rpm, coded and steady light, plus stills (68 captures) |
 | `gs_2026-10-26.zip` | global shutter, first session, 3 rpm (16 captures) |
 | `gs_dot_2026-10-28.zip` | white dot on a blade, used to measure the monitor's response (6 captures) |
+| `rs_unpadded_2026-11-01.zip` | rolling shutter with the exposure equal to the code, 3, 5 and 8 rpm, coded and steady light, plus stills (61 captures; unzips to `padding_readout_0/`) |
 
 The per-capture scores behind every rig number on this page are in
-[`results/rig.csv`](results/rig.csv) ([columns](results/README.md)).
+[`results/rig.csv`](results/rig.csv), and those of the unpadded rolling shutter session in
+[`results/rig_unpadded.csv`](results/rig_unpadded.csv) ([columns](results/README.md)).
+
+**Regenerate the figures.** One script redraws every rig figure in the report (and writes the numbers its text
+quotes) from the data in this repo:
+
+```bash
+cd software/deconvolution
+uv run python ../../report/figures/make_figures.py
+```
+
+The simulation figures also need the Blender renders; the script lists any input it is missing and how to make it.
 
 ## Software
 
@@ -227,7 +245,8 @@ The per-capture scores behind every rig number on this page are in
 │   ├── motor_control/    fan Arduino sketch
 │   ├── deconvolution/    calibration, deblurring (3 methods), speed estimate, tests, simulation
 │   └── view_raw.py       view captured DNGs
-├── results/              per-capture rig scores (rig.csv)
+├── results/              per-capture rig scores (rig.csv, rig_unpadded.csv)
+├── report/               the ICCP report source and make_figures.py
 ├── docs/img/             figures for this page
 └── presentation/         pitch and lightning talk slides
 ```
