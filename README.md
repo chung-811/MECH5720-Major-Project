@@ -20,6 +20,7 @@ Only the light differs: <b>coded</b> flashes come back sharp, <b>steady</b> ligh
 [The rig](#the-rig) ·
 [Results](#results) ·
 [Quick start](#quick-start) ·
+[Data](#data) ·
 [Software](#software) ·
 [Team](#team)
 
@@ -192,6 +193,27 @@ every warning means) is in [`software/deconvolution/README.md`](software/deconvo
 cd software/deconvolution && uv run pytest
 ```
 
+## Data
+
+The raw captures are in the [**dataset release**](https://github.com/chung-811/MECH5720-Major-Project/releases/tag/dataset-v1):
+raw `.dng` files, a `.png` preview, and a `.json` log of when each code bit was shown, in the folder layout
+`deblur.py` expects (`gs_stills`, `gs_3rpm`, `gs_3rpm_flat`, ...):
+
+```bash
+unzip gs_2026-10-28.zip -d data
+cd software/deconvolution
+uv run python deblur.py ../../data/gs_2026-10-28/gs_8rpm --stills ../../data/gs_2026-10-28/gs_stills
+```
+
+| File | Contents |
+| --- | --- |
+| `gs_2026-10-28.zip` | global shutter, 3, 5 and 8 rpm, coded and steady light, plus stills (68 captures) |
+| `gs_2026-10-26.zip` | global shutter, first session, 3 rpm (16 captures) |
+| `gs_dot_2026-10-28.zip` | white dot on a blade, used to measure the monitor's response (6 captures) |
+
+The per-capture scores behind every rig number on this page are in
+[`results/rig.csv`](results/rig.csv) ([columns](results/README.md)).
+
 ## Software
 
 ```
@@ -204,7 +226,9 @@ cd software/deconvolution && uv run pytest
 │   ├── motor_control/    fan Arduino sketch
 │   ├── deconvolution/    calibration, deblurring (3 methods), speed estimate, tests, simulation
 │   └── view_raw.py       view captured DNGs
-└── presentation/         lightning talk slides
+├── results/              per-capture rig scores (rig.csv)
+├── docs/img/             figures for this page
+└── presentation/         pitch and lightning talk slides
 ```
 
 | Folder | Read more |
@@ -212,6 +236,10 @@ cd software/deconvolution && uv run pytest
 | `software/data_capture` | [setup, Pi, capturing](software/data_capture/README.md) |
 | `software/deconvolution` | [lab day and commands](software/deconvolution/README.md) · [simulation studies and results](software/deconvolution/STUDIES.md) |
 | `software/illumination` | [running the display](software/illumination/README.md) |
+| `software/coded_sequence` | [comparing codes](software/coded_sequence/README.md) |
+| `software/motor_control` | [wiring and serial commands](software/motor_control/README.md) |
+
+Slides: [project pitch](presentation/MECH5720-pitch.pdf) · [lightning talk](presentation/MECH5720-lightning-talk.pptx)
 
 ## Team
 
