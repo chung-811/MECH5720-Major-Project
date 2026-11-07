@@ -12,8 +12,7 @@ By hand, in this folder: `uv sync`, then `uv run python check.py`.
 
 ## Lab day
 
-**0. Latest code.** In VS Code, click the branch name (bottom left) and pick `krish/sim-deconv`, then
-pull (or `git checkout krish/sim-deconv && git pull`).
+**0. Latest code.** `git checkout main && git pull`.
 
 **1. The rig**
 - Cover the front of the white stand in matte black. Anything bright behind the blades ruins the deblur.

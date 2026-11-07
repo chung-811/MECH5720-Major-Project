@@ -22,8 +22,9 @@ def noise_amp_db(code, n=300):
 
 def lcd_kernel(code, refresh_hz=60, tau_ms=4.0, dt=0.05):
     """Code as the monitor actually emits it: first-order lag of time constant
-    tau_ms, then averaged back to one sample per chop. Replace with the
-    measured waveform once Daniel/Oliver have it."""
+    tau_ms, then averaged back to one sample per chop. The monitor we measured
+    on the rig is asymmetric (about 44 ms to brighten, dims at once); that
+    model lives in software/deconvolution/real.py (MONITOR)."""
     chop = 1000 / refresh_hz; L = int(round(chop / dt)); a = min(dt / tau_ms, 1.0)
     s = np.r_[np.repeat(code, L), np.zeros(int(6 * tau_ms / dt))].astype(float)
     y = np.zeros_like(s)

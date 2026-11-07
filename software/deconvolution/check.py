@@ -58,7 +58,7 @@ def main():
         x = capture.deblur(img, T.calib(), T.CODE, T.CHIP, T.T_EXP, T.OMEGA * 60 / (2 * np.pi), "global", "dpir")[0]
     gain = T.blade_psnr(x, truth) - T.blade_psnr(img, truth)
     if not line("Deblurs a test blade", gain > 10, f"+{gain:.1f} dB over the blurred capture, {time.time() - t:.0f} s"):
-        return "the deblur ran but did not sharpen the test blade: run `uv run pytest` and send the output to Krish"
+        return "the deblur ran but did not sharpen the test blade: run `uv run pytest` to see which step fails"
     return None
 
 
