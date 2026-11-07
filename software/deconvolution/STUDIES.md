@@ -63,9 +63,12 @@ blur is long (`coding_gain.py`, PSNR coded / constant / short exposure + denoise
 
 | blur | full light | a tenth of the light |
 | --- | --- | --- |
-| 25 px | 38.1 / 37.7 / 36.6 | 32.8 / 33.5 / 28.4 |
-| 51 px | 36.4 / 33.2 / 34.0 | 29.2 / 29.0 / 28.1 |
-| 101 px | 36.3 / 28.6 / 29.7 | 29.8 / 26.0 / 26.7 |
+| 25 px | 36.9 / 35.9 / 34.4 | 30.4 / 29.8 / 25.5 |
+| 51 px | 36.1 / 31.0 / 32.3 | 30.3 / 26.3 / 25.3 |
+| 101 px | 35.5 / 27.0 / 28.5 | 28.9 / 23.5 / 24.9 |
+
+(Re-run 29 Oct on the current pipeline; the report's table reads these from `out/coding_gain.npy`. The
+benchmark above and the cost and stress-test tables below are from earlier versions of the pipeline.)
 
 ## Simulation results against the success criteria
 
@@ -85,6 +88,9 @@ Textured blade unless stated, DPIR, one noise draw per case (`rows.py`, `legibil
 3. Blind speed: within 0.26% of the true speed in 9 of 9 runs (3 speeds x 3 noise draws), target 5%.
 
 What each thing going wrong costs (one at a time, against 38.1 dB, 25 px of blur):
+
+This table is from an earlier pipeline. `faults.py` redoes the speed and bit rows with the current one (DPIR,
+textured blade, 25 px, against 36.9 dB): speed off 1 / 2 / 5% costs 0.7 / 2.4 / 8.0 dB, one bit shown twice 5.2 dB.
 
 | | cost |
 | --- | --- |

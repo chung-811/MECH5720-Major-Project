@@ -59,7 +59,7 @@
     },
     {
       "label": "3. Tests: run all checks",
-      "detail": "35 automated checks of the deblur pipeline, about a minute",
+      "detail": "the automated checks of the deblur pipeline, about a minute",
       "type": "shell",
       "command": "export PATH=\"$HOME/.local/bin:$PATH\"; uv run pytest -q",
       "options": {
@@ -86,7 +86,35 @@
       "problemMatcher": []
     },
     {
-      "label": "4. Open a deblur terminal",
+      "label": "4. Deblur a capture folder",
+      "detail": "type the Test folder name from the camera GUI (e.g. gs_3rpm): calibrates from gs_stills/rs_stills and deblurs",
+      "type": "shell",
+      "command": "export PATH=\"$HOME/.local/bin:$PATH\"; uv run python deblur.py \"${input:folder}\"",
+      "options": {
+        "cwd": "${workspaceFolder}/software/deconvolution"
+      },
+      "windows": {
+        "command": "set \"PATH=%USERPROFILE%\\.local\\bin;%PATH%\" && uv run python deblur.py \"${input:folder}\"",
+        "options": {
+          "cwd": "${workspaceFolder}\\software\\deconvolution",
+          "shell": {
+            "executable": "cmd.exe",
+            "args": [
+              "/d",
+              "/c"
+            ]
+          }
+        }
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "focus": true,
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "5. Open a deblur terminal",
       "detail": "a terminal in software/deconvolution, for calibrate.py and the deblur scripts",
       "type": "shell",
       "command": "export PATH=\"$HOME/.local/bin:$PATH\"; exec $SHELL",
@@ -112,6 +140,13 @@
         "clear": true
       },
       "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "folder",
+      "type": "promptString",
+      "description": "Test folder name from the camera GUI, e.g. gs_3rpm (the speed is read from the name)"
     }
   ]
 }

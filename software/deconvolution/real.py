@@ -72,10 +72,13 @@ def log_timing(path):
     if "code" not in d:
         return {}
     try:
-        t0 = d["readout_s"] + (d["t0_monotonic_ns"] - d["frame_boundary_monotonic_ns"]) / 1e9
+        # the sensor's own readout when the log has it; older logs only have the GUI's readout field, which
+        # also sets the exposure and so can be 0 while the sensor still takes its full readout
+        readout = d.get("sensor_readout_s") or d["readout_s"]
+        t0 = readout + (d["t0_monotonic_ns"] - d["frame_boundary_monotonic_ns"]) / 1e9
     except KeyError as err:
         raise SystemExit(f"{path}: no {err} in it, so not a complete run log from the capture GUI")
-    return dict(readout_s=d["readout_s"], t0=t0, late_bits=d.get("late_bits", 0), aborted=d.get("aborted", False))
+    return dict(readout_s=readout, t0=t0, late_bits=d.get("late_bits", 0), aborted=d.get("aborted", False))
 
 
 def mean_frames(paths):
@@ -157,13 +160,38 @@ def check_bits(L, t, code, chip, black, t0):
 READOUT_MAX, T0_MAX = 0.15, 0.1          # s, fit_readout's search: past either, the fit is not trusted
 
 
-def fit_readout(coded, constant, code, chip, t_exp, axis=0, black=0.0, tau=0.0):
+# Ollie's monitor, from a white dot on a blade (gs_dot, 28 Oct, code_16bit_best_4refresh, 3 rpm): it brightens
+# with a 44 ms time constant and goes dark at once, so a one-bit (67 ms) flash peaks at 78% of white. Deblurring
+# with it instead of an ideal screen was better on 40 of 46 global shutter captures (all at 3 and 5 rpm, 5 of 11
+# at 8 rpm), 0.3 to 0.8 dB a set on average; on 3 rolling shutter captures an ideal screen did 0.15-0.6 dB better
+MONITOR = dict(black=0.0, rise=0.044, fall=0.0, t0=0.0)
+
+
+def monitor_lag(monitor):
+    """(rise, fall) time constants (s) of the calibration's monitor: `rise` and `fall` (calibrate.py auto writes
+    MONITOR's), each falling back to the one `tau` that calibrate.py monitor fits both ways"""
+    if not isinstance(monitor, dict):
+        raise SystemExit(f"the calibration's monitor is {monitor!r}: it must be {{black, rise, fall, t0}}")
+    tau = monitor.get("tau", 0.0)
+    given = monitor.get("rise", tau), monitor.get("fall", tau)
+    try:
+        rise, fall = map(float, given)
+    except (TypeError, ValueError):
+        rise = fall = float("nan")
+    if not (0 <= rise < 1 and 0 <= fall < 1):                    # also refuses nan
+        raise SystemExit(f"monitor rise {given[0]!r} and fall {given[1]!r} in the calibration: each must be 0 "
+                         f"(instant) or a time constant in seconds under 1")
+    return rise, fall
+
+
+def fit_readout(coded, constant, code, chip, t_exp, axis=0, black=0.0, tau=0.0, fall=None):
     """(readout_s, t0, rms, spread) for a rolling shutter: first to last line, and when the code starts after the
     first line opens. From a still scene shot once under the code and once under constant light (same
     exposure, gain, code length). Their ratio cancels the scene, leaving per line the share of light its
     window caught; line l opens at l readout / lines. Only measurable when lines catch the code differently
     (exposure shorter than code + readout + t0); otherwise per-row and per-frame are the same anyway.
-    spread: std / mean of the measured ratio over lines, about 0 when it is not measurable"""
+    spread: std / mean of the measured ratio over lines, about 0 when it is not measurable. black, tau, fall:
+    the monitor (F.lcd: tau while it brightens, fall while it dims, default tau, as monitor_lag gives them)"""
     n = coded.shape[axis]
     keep = constant > 0.1 * np.percentile(constant, 99)
     num = np.where(keep, coded, 0).sum(1 - axis)
@@ -172,7 +200,7 @@ def fit_readout(coded, constant, code, chip, t_exp, axis=0, black=0.0, tau=0.0):
     lines, ratio = np.arange(n)[ok], num[ok] / den[ok]
     dt = chip / 32
     t = np.arange(-0.3, t_exp + 0.6, dt)
-    cum = lambda L: np.r_[0, np.cumsum(F.lcd(L, dt, tau) if tau else L)] * dt
+    cum = lambda L: np.r_[0, np.cumsum(F.lcd(L, dt, tau, fall, start=black) if tau or fall else L)] * dt
     edges = np.r_[t - dt / 2, t[-1] + dt / 2]
     Cc, Cb = cum(F.light(t, code, chip, black)), cum(F.light(t, "1" * len(code), chip, black))
     share = lambda C, a, t0: np.interp(a + t_exp - t0, edges, C) - np.interp(a - t0, edges, C)
@@ -189,12 +217,13 @@ def fit_readout(coded, constant, code, chip, t_exp, axis=0, black=0.0, tau=0.0):
     return float(res.x[0]), float(res.x[1]), float(res.fun), float(ratio.std() / ratio.mean())
 
 
-def align(ref, x, hub, r, th):
+def align(ref, x, hub, r, th, near=None, within=np.radians(10)):
     """(reference turned to where the blade is in x, angle turned): a still of the stopped blade, rotated
     about the hub by the angle that best matches x over the rings r and angles th (circular
     cross-correlation of every ring, summed). Puts the ground truth where the deblurred blade is.
     Matched on the change along each ring, scaled to unit size per ring: edges and print, so uneven
-    light cannot pull it onto a brighter look-alike blade"""
+    light cannot pull it onto a brighter look-alike blade. near: only turns within `within` of this one
+    (blade_angle's), as the fan's blades look alike and one deblurred blade cannot always tell them apart"""
     dth = th[1] - th[0]
     full = th[0] + np.arange(int(np.ceil(2 * np.pi / dth))) * dth
     Px, Pr = F.polar(x, hub, r, th)[0], F.polar(ref, hub, r, full)[0]
@@ -205,12 +234,59 @@ def align(ref, x, hub, r, th):
     pad = np.zeros_like(Pr)
     pad[:, :Px.shape[1]] = Px
     corr = np.fft.irfft(np.conj(np.fft.rfft(pad)) * np.fft.rfft(Pr), Pr.shape[1]).sum(0)
-    s = int(np.argmax(corr))
+    if near is None:
+        s = int(np.argmax(corr))
+    else:
+        off = (np.arange(len(corr)) * dth - near + np.pi) % (2 * np.pi) - np.pi
+        s = int(np.argmax(np.where(np.abs(off) <= within, corr, -np.inf)))
     a, b, c = corr[s - 1], corr[s], corr[(s + 1) % len(corr)]
     d = a - 2 * b + c
     shift = (s + (0.5 * (a - c) / d if d < 0 else 0.0)) * dth
-    turned = F.cartesian(F.polar(ref, hub, r, th + shift)[0], hub, r, th, x.shape)
+    turned = F.cartesian(F.polar(ref, hub, r, th + shift, F.INTERP)[0], hub, r, th, x.shape, F.INTERP)
     return turned, (shift + np.pi) % (2 * np.pi) - np.pi
+
+
+def ring_matcher(ref, img, hub, r):
+    """(match, step): match(omega, t, w) scores every turn of the reference's whole rings (every blade), blurred
+    by a motion omega under light w (light x seconds of each sub-frame t, F.weights for one line), against the
+    same rings of the capture, on edges scaled per ring as in align; entry s is the reference turned by
+    s * step. The rings are sampled once (cubic) at an angle step that divides the full turn exactly, and the
+    blur is shared linearly between its two nearest steps: nearest-step blur on bilinear samples read speeds
+    1.2% low in a noiseless simulation, this 0.1%"""
+    n = int(np.ceil(2 * np.pi * r[-1]))
+    dth = 2 * np.pi / n
+    full = np.arange(n) * dth
+
+    def edges(P):
+        D = np.diff(P, axis=1, append=P[:, :1])
+        return D / (np.linalg.norm(D, axis=1, keepdims=True) + 1e-12)
+    ref_f = np.fft.rfft(F.polar(ref, hub, r, full, F.INTERP)[0])
+    img_f = np.conj(np.fft.rfft(edges(F.polar(img, hub, r, full, F.INTERP)[0])))
+
+    def match(omega, t, w):
+        k = np.zeros(n)                                           # the blur along each ring
+        pos = omega * np.asarray(t) / dth
+        i = np.floor(pos).astype(int)
+        np.add.at(k, i % n, w * (1 - (pos - i)))
+        np.add.at(k, (i + 1) % n, w * (pos - i))
+        blurred = np.fft.irfft(ref_f * np.fft.rfft(k), n)
+        return np.fft.irfft(img_f * np.fft.rfft(edges(blurred)), n).sum(0)
+    return match, dth
+
+
+def blade_angle(ref, img, hub, r, omega, t, w):
+    """(turn, margin): the turn (rad, as align's) that puts the reference's blades where the capture's are at
+    t = 0 (ring_matcher), and how clearly: its match over the best one more than 10 deg away (nan when either
+    is not positive). All the blades vote at once, so it tells look-alike blades apart: the rig's differ only
+    in their letters, and on 35 coded captures of 28 Oct it picked the blade the deblur shows every time
+    (margins 1.7 to 3.0) where align alone picked a look-alike on 13. Steady light gives lower margins (about
+    1.4), and a scene with clutter and smaller letters (26 Oct) as low as 1.01: a margin near 1 is a guess"""
+    match, dth = ring_matcher(ref, img, hub, r)
+    corr = match(omega, t, w)
+    s = int(np.argmax(corr))
+    off = np.abs((np.arange(len(corr)) - s + len(corr) // 2) % len(corr) - len(corr) // 2) * dth
+    second = corr[off > np.radians(10)].max()
+    return float(s * dth), float(corr[s] / second) if corr[s] > 0 and second > 0 else float("nan")
 
 
 def turned_at(img, centre, angle, rows, cols):
@@ -269,6 +345,23 @@ def radii_from_stills(f0, f1, hub):
     rows, cols = np.nonzero(moved(f0, f1))
     rr = np.hypot(rows - hub[0], cols - hub[1])
     return max(2.0, float(np.floor(np.percentile(rr, 1))) - 3), float(np.ceil(np.percentile(rr, 99.5))) + 3
+
+
+def remove_static(img, static, hub, r_out):
+    """(img with the static scene taken out, a, b). img ~ a * static + b is fitted on the pixels outside the
+    blade circle (radius r_out + 5 px), where nothing moves, and subtracted. static: the minimum of the stills
+    (calibrate.py auto saves it). On the rig's first 11 captures a was 0.46-0.51 under the coded light (8 of 16
+    bits on: the static scene at half brightness, as expected). Without this the arc finder locked onto glow
+    and wires instead of the blade and refused 4 of the 11; with it all 11 deblur and the arc follows the blade"""
+    if static.shape != img.shape:
+        raise ValueError(f"the static scene is {static.shape[1]} x {static.shape[0]} but the capture is "
+                         f"{img.shape[1]} x {img.shape[0]}: calibrate from stills taken the same way")
+    yy, xx = np.mgrid[:img.shape[0], :img.shape[1]]
+    out = np.hypot(yy - hub[0], xx - hub[1]) > r_out + 5
+    if out.sum() < 1000:
+        raise ValueError("the fan fills the picture, so there is nothing outside it to fit the static scene on")
+    a, b = np.linalg.lstsq(np.c_[static[out], np.ones(out.sum())], img[out], rcond=None)[0]
+    return img - (a * static + b), float(a), float(b)
 
 
 def find_arc(img, hub, r):

@@ -39,6 +39,7 @@ def deblur(img, L, Tc, **kw):
 
 
 fig, ax = plt.subplots(1, len(CODES), figsize=(5 * len(CODES), 3.6), sharey=True)
+saved = {}                                  # "code|readout|method" -> band PSNRs, for report/figures
 print(f"{'code':10s} {'readout':16s} {'method':10s} {'mean':>6s} {'worst':>6s}  band PSNR first -> last line read (dB)")
 for a, (cname, code) in zip(ax, CODES.items()):
     Tc = len(code) * chip
@@ -47,6 +48,7 @@ for a, (cname, code) in zip(ax, CODES.items()):
     b = F.bands(scene, deblur(gs, L, Tc))
     print(f"{cname:10s} {'global':16s} {'':10s} {np.nanmean(b):6.2f} {np.nanmin(b):6.2f}  " + " ".join(f"{v:5.1f}" for v in b))
     a.plot(b, "k-", lw=2, label="global shutter")
+    saved[f"{cname}|global|"] = b
     for (mode, ro), col in zip(READOUTS.items(), ("C0", "C1", "C3")):
         tl = ro / scene.n_lines
         rs = F.capture(scene, L, Tc, flux, np.random.default_rng(1), tl, **NOISE)
@@ -56,6 +58,7 @@ for a, (cname, code) in zip(ax, CODES.items()):
             print(f"{'':10s} {mode} {ro / chip:4.1f}ch {meth:10s} {np.nanmean(b):6.2f} {np.nanmin(b):6.2f}  "
                   + " ".join(f"{v:5.1f}" for v in b))
             a.plot(b, ls, color=col, label=f"{mode} {meth}")
+            saved[f"{cname}|{mode}|{meth}"] = b
     a.set_title(f"{cname} ({Tc * 1e3:.0f} ms exposure, DPIR)", fontsize=9)
     a.set_xlabel("band of sensor lines (first -> last read)")
 ax[0].set_ylabel("PSNR over the blade (dB)")
@@ -63,4 +66,7 @@ ax[-1].legend(fontsize=7)
 plt.tight_layout()
 Path("out").mkdir(exist_ok=True)
 plt.savefig(f"out/rows_axis{scene.axis}.png", dpi=90)
+np.savez(f"out/rows_{Path(args.render).stem}_axis{scene.axis}.npz", keys=np.array(list(saved)),
+         bands=np.array(list(saved.values())), chip=chip, codes=np.array(list(CODES.values())),
+         readout_names=np.array(list(READOUTS)), readouts=np.array(list(READOUTS.values())))
 print(f"figure in out/rows_axis{scene.axis}.png")

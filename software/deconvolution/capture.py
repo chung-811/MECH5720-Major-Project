@@ -42,9 +42,16 @@ def brightness(scene, code, chip, t_exp, monitor, t0=None):
     """monitor brightness at the sub-frames: the code through the calibrated black level, timing and LCD
     lag, scaled so a still pixel deblurs to its own value in a still capture of the same exposure.
     t0 overrides the calibrated code start"""
-    L = F.light(scene.t, code, chip, monitor.get("black", 0.0), monitor.get("t0", 0.0) if t0 is None else t0)
-    if monitor.get("tau"):
-        L = F.lcd(L, scene.dt, monitor["tau"])
+    black = monitor.get("black", 0.0)
+    t0 = monitor.get("t0", 0.0) if t0 is None else t0
+    rise, fall = real.monitor_lag(monitor)
+    # the lag runs from black (the screen shows black for the code's pre-roll), from the code's start: a code
+    # that starts before the first sub-frame (t0 < 0) has been brightening the screen for that long already
+    n = int(np.ceil(max(0.0, scene.t[0] - t0) / scene.dt)) if rise or fall else 0
+    t = np.r_[scene.t[0] - scene.dt * np.arange(n, 0, -1), scene.t]
+    L = F.light(t, code, chip, black, t0)
+    if rise or fall:
+        L = F.lcd(L, scene.dt, rise, fall, start=black)[n:]
     return L / F.weights(scene.t, scene.dt, L, t_exp, [0.0]).sum()
 
 
@@ -64,10 +71,22 @@ def deblur(img, calib, code, chip, t_exp, rpm, method, solver="dpir", lam=1e-2, 
                              "with the data_capture GUI, whose run log has it")
     scene = scene_for(calib, img.shape, t_exp, chip, readout, rpm * 2 * np.pi / 60)
     L = brightness(scene, code, chip, t_exp, calib.get("monitor", {}), t0)
+    scene.L, scene.t_exp = L, t_exp                 # the capture's light, for compare to pick the blade with
     kw = dict(t_line=readout / scene.n_lines, per_row=method == "rs-row", ref_line=scene.n_lines // 2)
     print(f"  {len(scene.r)} rings x {len(scene.th)} arc samples, {len(scene.t)} sub-frames of {scene.dt * 1e3:.2f} ms")
     P, lines = F.unwrap(scene, img)
-    right, wrong = F.residuals(scene, P, lines, L, t_exp, [scene.omega, -scene.omega], **kw)
+    Ps = F.unwrap(scene, img, F.SPEED_INTERP)[0]   # for the direction check and speed search (F.SPEED_INTERP)
+    if np.isnan(lines).any():
+        print(f"  {100 * np.isnan(lines).mean():.0f}% of the arc falls outside the image: left out of the fit")
+    noise = F.blade_noise(img, F.wrap(scene, np.ones((len(scene.r), len(scene.th)))) > 0.5)
+    sigma = None if noise is None else F.BLADE_NOISE_GAIN * noise
+    if noise is None:
+        print("  warning: too few bright blade pixels to measure the noise, so DPIR estimates it from the whole arc")
+    if set(code) == {"1"}:                       # steady light blurs nearly the same either way: no check
+        right = wrong = 1.0
+        print("  steady light: which way the fan turns cannot be told from it, keeping --rpm's sign")
+    else:
+        right, wrong = F.residuals(scene, Ps, lines, L, t_exp, [scene.omega, -scene.omega], **kw)
     if wrong < SIGN_MARGIN * right:              # the other direction explains the capture clearly better
         print(f"  *** the fan turns the other way to --rpm: {-rpm:+g} rpm fits {right / wrong:.1f}x better, deblurring "
               f"at that. Check --rpm's sign (calibrate.py auto prints it)")
@@ -77,17 +96,47 @@ def deblur(img, calib, code, chip, t_exp, rpm, method, solver="dpir", lam=1e-2, 
               f"{100 * (1 - SIGN_MARGIN):.0f}%), keeping --rpm's sign")
     if find_speed:
         grid = scene.omega * np.linspace(0.8, 1.2, 21)
-        est, scores = F.speed(scene, P, lines, L, t_exp, grid, **kw)
+        est, scores = F.speed(scene, Ps, lines, L, t_exp, grid, **kw)
         print(f"  blind speed {est * 60 / (2 * np.pi):.3f} rpm (commanded {rpm:.3f})")
         if np.argmin(scores) in (0, len(grid) - 1):
             print(f"  *** the blind speed is at the edge of its search ({0.8 * rpm:.3f} to {1.2 * rpm:.3f} rpm), so the "
                   f"true speed is outside it and this estimate is wrong: rerun with --rpm nearer the true speed")
         scene.omega = est
     if solver == "dpir":
-        x = F.dpir(*F.forward_model(scene, L, t_exp, lines, **kw), P)
+        x = F.dpir(*F.forward_model(scene, L, t_exp, lines, **kw), P, sigma=sigma)
     else:
         x = F.tikhonov(scene, P, lines, L, t_exp, lam, **kw)
     return F.wrap(scene, x), scene, scene.omega * 60 / (2 * np.pi)
+
+
+def speed_from_blur(img, calib, ref, code, chip, t_exp, rpm, span=0.25):
+    """(speed (rpm), True when it is at the edge of its search): the speed whose blur of the still of the
+    stopped fan, every blade on every ring, best matches the capture (real.ring_matcher). Searched within
+    +-span of rpm (only the bounds come from it) in 1% steps, then 0.05% steps round the best, refined by a
+    parabola of at most one step. One time grid, the finest any candidate needs, serves every candidate, so
+    the light is sampled the same way each time (a grid per candidate made the match jump between speeds).
+    calib: for this capture (for_capture); light: the code through its monitor, one line's timing, which is
+    every line's on a global shutter or a rolling shutter padded so each line sees the whole code. The
+    still's own blade angle matters where the blur is short next to the sharpness of the edges: matched to
+    each of the rig's three stills, a capture's estimate moved by up to 1.2% at 5 and 8 rpm, 3.6% at 3 rpm"""
+    r = np.arange(calib["radius_px"][0], calib["radius_px"][1] + 1.0)
+    match = real.ring_matcher(ref, img, calib["hub"], r)[0]
+    scene = scene_for(calib, img.shape, t_exp, chip, 0.0, abs(rpm) * (1 + span) * 2 * np.pi / 60)
+    L = brightness(scene, code, chip, t_exp, calib.get("monitor", {}))
+    w = F.weights(scene.t, scene.dt, L, t_exp, [0.0])[0]
+    score = lambda v: match(v * 2 * np.pi / 60, scene.t, w).max()
+    coarse = rpm * np.linspace(1 - span, 1 + span, int(round(2 * span / 0.01)) + 1)
+    i = int(np.argmax([score(v) for v in coarse]))
+    fine = coarse[i] + rpm * np.arange(-0.015, 0.0151, 0.0005)
+    m = np.array([score(v) for v in fine])
+    j = int(np.argmax(m))
+    edge = i in (0, len(coarse) - 1) or j in (0, len(fine) - 1)
+    if 0 < j < len(fine) - 1:
+        a, b, c = m[j - 1:j + 2]
+        d = a - 2 * b + c
+        step = 0.5 * (a - c) / d if d < 0 else 0.0
+        return float(fine[j] + float(np.clip(step, -1, 1)) * (fine[1] - fine[0])), edge
+    return float(fine[j]), edge
 
 
 def outline(ax, calib):
@@ -100,11 +149,20 @@ def outline(ax, calib):
     ax.plot(hc, hr, "r+", ms=12)
 
 
-def compare(x, scene, ref):
+def compare(x, scene, ref, img=None):
     """(reference turned and scaled onto x, PSNR, SSIM, PSNR by band of sensor lines) over the blade.
     The still is turned to where the deblurred blade is (real.align) and given one gain fitted to x, as
-    the two are exposed differently; units are fractions of white, as in the simulation"""
-    turned = real.align(ref, x, scene.hub, scene.r, scene.th)[0]
+    the two are exposed differently; units are fractions of white, as in the simulation. img: the capture
+    x came from; with it the blade is picked from the whole capture first (real.blade_angle), as the
+    fan's blades look alike"""
+    if ref.shape != x.shape:
+        raise SystemExit(f"the reference is {ref.shape[1]} x {ref.shape[0]} but the capture is {x.shape[1]} x "
+                         f"{x.shape[0]}: take the reference still in the same camera mode as the coded captures")
+    near = None
+    if img is not None:
+        w = F.weights(scene.t, scene.dt, scene.L, scene.t_exp, [0.0])[0]
+        near, scene.blade_margin = real.blade_angle(ref, img, scene.hub, scene.r, scene.omega, scene.t, w)
+    turned = real.align(ref, x, scene.hub, scene.r, scene.th, near)[0]
     window = F.wrap(scene, np.ones((len(scene.r), len(scene.th)))) > 0.5
     turned = turned * (x[window] @ turned[window]) / (turned[window] @ turned[window])
     scene.truth = turned
@@ -139,8 +197,21 @@ def main(method):
         ap.error("--rpm must not be 0")
 
     calib = json.loads(Path(args.calib).read_text())
+    if real.monitor_lag(calib.get("monitor", {})) == (0.0, 0.0):        # also refuses a malformed monitor
+        print(f"*** {args.calib} treats the monitor as switching at once, but ours takes about "
+              f"{real.MONITOR['rise'] * 1e3:.0f} ms to brighten: run calibrate.py auto again (deblur.py does it "
+              f"for you) for a sharper result")
     dark = real.mean_frames(real.files(args.dark)) if args.dark else 0.0
     ref = real.load_dng(args.reference) - dark if args.reference else None
+    # what never moves (calibrate.py auto, 3+ stills): taken out of every capture and the reference, so the
+    # arc finder sees only the blades and the deblur only what turns (real.remove_static)
+    static = np.load(Path(args.calib).parent / calib["static"]) if calib.get("static") else None
+    if ref is not None and static is not None:
+        try:
+            ref = real.remove_static(ref, static, calib["hub"], calib["radius_px"][1])[0]
+        except ValueError as err:
+            raise SystemExit(f"reference: {err}")
+        print("scoring against the reference with the static scene taken out (the moving parts only)")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     scores, band_scores, speeds = [], [], []
@@ -148,6 +219,8 @@ def main(method):
         img = real.load_dng(path) - dark
         stem = out / f"{path.stem}_{method}"
         try:
+            if static is not None:
+                img, a_static, _ = real.remove_static(img, static, calib["hub"], calib["radius_px"][1])
             calib_here = for_capture(calib, img)
         except ValueError as err:
             print(f"{path.name}: skipped, {err}")
@@ -169,6 +242,11 @@ def main(method):
             print(f"{path.name}: skipped, the run was stopped early (ESC)")
             continue
         print(f"{path.name}: {len(code)} bits of {chip * 1e3:.1f} ms, exposure {t_exp:.3f} s, {method}, {args.solver}")
+        if static is not None:
+            print(f"  static scene taken out (here {a_static:.2f} x as bright as in the stills)")
+            if not 0.05 < a_static < 1.5:
+                print("  *** that does not look like the stills' scene: did the camera, the rig or the room light "
+                      "change? Retake the stills")
         if timing.get("late_bits"):
             print(f"  warning: {timing['late_bits']} bits were shown late (over 10 ms), expect a worse deblur")
         x, scene, rpm = deblur(img, calib_here, code, chip, t_exp, args.rpm, method, args.solver, args.lam, args.find_speed,
@@ -180,7 +258,7 @@ def main(method):
         show(np.clip(x, 0, None), ax[1], f"deblurred, {method}, {args.solver}, {rpm:.3f} rpm")
         outline(ax[0], calib_here)
         if ref is not None:
-            truth, p, q, b = compare(x, scene, ref)
+            truth, p, q, b = compare(x, scene, ref, img)
             scores.append((p, q))
             band_scores.append(b)
             show(truth, ax[2], "reference, turned to the blade")

@@ -12,45 +12,63 @@ By hand, in this folder: `uv sync`, then `uv run python check.py`.
 
 ## Lab day
 
-**The rig**
+**0. Latest code.** In VS Code, click the branch name (bottom left) and pick `krish/sim-deconv`, then
+pull (or `git checkout krish/sim-deconv && git pull`).
+
+**1. The rig**
 - Cover the front of the white stand in matte black. Anything bright behind the blades ruins the deblur.
 - Tape a white card with letters (5 to 8 mm tall, different on each blade) to each blade.
-- Dark room. Camera about 33 cm away, fan filling the picture.
+- Dark room. Camera about 33 cm away, fan as large as possible but **all of it inside the picture**.
 
-**The fan** (Arduino IDE > Serial Monitor, 9600 baud, Newline; wait for the help text)
-- `s 200` turn 200 steps (do once first, to take up slack in the gears)
-- `s 400` turn 400 steps
-- `v 5` set 5 rpm, then `r 5` spin 5 turns (about a minute)
+**2. The fan** (Arduino IDE > Serial Monitor, 9600 baud, Newline; wait for the help text)
+- `s 200` once first, in the same direction as the stills, to take up slack in the gears
+- `s 400` turns 400 steps (between stills)
+- `v 3` sets 3 rpm, then `r 5` spins 5 turns
 
-**The shots** (camera GUI, same gain for everything, touch nothing in between)
-1. Fan stopped: Capture DNG, `s 400`, Capture DNG, `s 400`, Capture DNG. These are the 3 stills.
-2. Fan stopped: one more Capture DNG. This is the reference.
-3. Fan spinning: Coded Capture with `code_16bit_4refresh.json`. Note the rpm.
+**3. The shots.** Everything is a **Coded Capture** (camera GUI > Stream Settings > Coded Capture). Type the
+**Test folder** name and pick the **Code file** before each group. Same gain throughout, touch nothing else.
 
-**Deblur** (VS Code: Run Task > **4. Open a deblur terminal**)
+| Test folder | Code file | Fan | Do |
+| --- | --- | --- | --- |
+| `gs_stills` | `flat_16bit_4refresh.json` | stopped | Run, `s 400`, Run, `s 400`, Run, then one more Run (the reference) |
+| `gs_3rpm` | `code_16bit_best_4refresh.json` | `v 3`, `r 5` | Run while it spins, up to 10 times |
+| `gs_5rpm`, `gs_8rpm`, ... | same | `v 5`, ... | same; the speed must be in the folder name |
+| `gs_3rpm_flat` | `flat_16bit_4refresh.json` | `v 3`, `r 5` | steady light, for comparison |
+
+Rolling shutter camera: the same with `rs_stills`, `rs_3rpm`, ... and **Padding 0.25 s** in Coded Capture.
+
+**4. Deblur.** VS Code: Run Task > **4. Deblur a capture folder**, type `gs_3rpm`. Or in a terminal (task 5):
 
 ```
-uv run python calibrate.py auto gs.json STILL1.dng STILL2.dng STILL3.dng --steps 400 --steps-per-rev 4076
-uv run python global-shutter.py CAPTURE.dng --calib gs.json --rpm 5 --reference REF.dng
+uv run python deblur.py gs_3rpm
 ```
 
-Results are in `out/`. Good: readable letters, no warnings. Then take the full set: 10 captures each at
-3, 5, 8 and 10 rpm, plus the same with `flat_16bit_4refresh.json` (steady light) and with a short normal
-exposure. Then the rolling shutter camera (`rs.json`, `rolling-shutter-per-row.py` and
-`rolling-shutter-per-frame.py`). Copy `output/` somewhere safe before leaving.
+It calibrates from `gs_stills` (the first time), takes out everything that never moves (found from the
+stills), deblurs every capture in `gs_3rpm` and scores each one against the reference. Results:
+`out/gs_3rpm/`, one picture per capture (capture, deblurred, reference). Good: readable letters and no `***`
+lines. Ben's motor turns clockwise in the picture, so name the folders `gs_-3rpm` (or it says "turns the
+other way" and fixes it itself). Don't use `--find-speed` for now: on the first real data it read 2.46 rpm
+for a fan really turning at about 3; the commanded speed is accurate.
+
+The monitor's lag is built in: from the white dot captures (28 Oct), it takes about 44 ms to brighten and
+goes dark at once. Modelling that made 40 of 46 global shutter captures sharper (0.3 to 0.8 dB on
+average). `deblur.py` redoes a
+calibration from before it; the other scripts warn (`*** ... switching at once`). Copy `output/` somewhere
+safe before leaving.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `calibrate.py auto CAL.json S1 S2 S3 --steps 400 --steps-per-rev 4076` | finds the fan centre and blade size from the 3 stills |
+| `deblur.py FOLDER` | everything below in one go, for a Test folder from the camera GUI |
+| `calibrate.py auto CAL.json S1 S2 S3 --steps 400 --steps-per-rev 2038` | finds the fan centre and blade size from the 3 stills |
 | `global-shutter.py CAPTURES --calib gs.json --rpm 5` | deblurs, global shutter |
 | `rolling-shutter-per-row.py CAPTURES --calib rs.json --rpm 5` | deblurs, rolling shutter, each row its own timing |
 | `rolling-shutter-per-frame.py CAPTURES --calib rs.json --rpm 5` | deblurs, rolling shutter, one timing for all rows |
 
 Add to a deblur command:
 - `--reference REF.dng` scores it against the still photo (PSNR, SSIM)
-- `--find-speed` works out the speed from the photo (needs `--rpm` within 20%)
+- `--find-speed` works out the speed from the photo (needs `--rpm` within 20%; not reliable on real data yet)
 - `--check` only draws the area it would deblur
 - `--solver tikhonov` faster, lower quality
 
@@ -61,10 +79,14 @@ All commands start with `uv run python`. `-h` on any of them lists every option.
 | You see | Do this |
 | --- | --- |
 | `NOT READY` | do what the line says |
+| `no stills folder` | take the stills first (`gs_stills` or `rs_stills`, step 3) |
+| `give the speed` | put it in the folder name (`gs_3rpm`) or add `--rpm 3` |
 | `could not reach the Pi` | check the ethernet cable or hotspot; or use the Pi's IP: `PI=pi@IP ./start-mac.command` |
 | `the pairs disagree` | something moved between the stills: take them again |
-| `poor fit` | wrong steps: with Ben's sketch it is `--steps 400 --steps-per-rev 4076` |
+| `poor fit` | wrong steps: Ben's sketch is full-step, `--steps 400 --steps-per-rev 2038` (4076 if it says half-step) |
 | `turns the other way` | the sign of `--rpm` was wrong; it fixed it. Flip the sign next time |
+| `does not look like the stills' scene` | the camera, rig or room light changed after the stills: retake them |
+| `switching at once` | an old calibration: run `deblur.py` (it redoes it) or `calibrate.py auto` again |
 | `edge of its search` | `--rpm` is more than 20% off the real speed |
 | `over 180` or `no dark gap` | the blades blur into each other: slow the fan, or check the stand is black |
 | blurry result, no warning | stand not black, fan over 10 rpm, or room light on |
@@ -75,9 +97,11 @@ All commands start with `uv run python`. `-h` on any of them lists every option.
 | File | What |
 | --- | --- |
 | `check.py` | is this computer ready |
+| `deblur.py` | the one command for lab day |
 | `calibrate.py` | makes the calibration file for each camera |
 | `global-shutter.py`, `rolling-shutter-per-*.py` | the three deblur methods |
 | `capture.py`, `real.py`, `flutter.py` | the code behind them |
+| `rig_eval.py` | the report's rig numbers: PSNR, letters read (OCR, needs `brew install tesseract`) and speed from the blur, one CSV row per capture |
 | `tests/` | automatic checks: `uv run pytest` |
 | `blender/`, `demo.py`, `rows.py`, `legibility.py`, `coding_gain.py`, `robust.py` | simulation studies |
 | `STUDIES.md` | how it works, simulation results, what each fault costs |
@@ -86,7 +110,7 @@ All commands start with `uv run python`. `-h` on any of them lists every option.
 
 - Calibrate by hand if `auto` fails: `calibrate.py grid CAP.dng` (picture with a pixel grid), read the
   centre, radii and angles off it, then `calibrate.py init CAL.json --hub ROW COL --radius R0 R1 --arc A0 A1`.
-- `calibrate.py monitor` measures the monitor's black level and lag. Only works on blades wider than
-  their blur; the deblur is fine without it.
+- `calibrate.py monitor` fits one lag for brightening and dimming from a wide plain blade. Not for our
+  monitor, which brightens slowly but dims at once: the built-in values (`MONITOR` in `real.py`) fit it better.
 - `calibrate.py readout` measures rolling shutter timing. Not needed with the camera GUI, which already
   makes every row see the whole code (so per-row and per-frame come out the same).

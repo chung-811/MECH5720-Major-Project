@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import capture
+import ocr
 import flutter as F
 import real
 
@@ -44,11 +45,14 @@ def calib(readout=0.0):
                 readout_s=readout, readout_axis=0, monitor=dict(black=0.0, tau=0.0, t0=0.0))
 
 
-def simulate(readout=0.0, texture=True, omega=OMEGA, dt=CHIP / 40, half=HALF):
+def simulate(readout=0.0, texture=True, omega=OMEGA, dt=CHIP / 40, half=HALF, lag=None):
     """capture of the blade under the code, finer in time than capture.py's own grid. Global shutter
-    when readout is 0, else line (row) l opens at l * readout / rows. Scaled like capture.brightness"""
+    when readout is 0, else line (row) l opens at l * readout / rows. Scaled like capture.brightness.
+    lag: (rise, fall) of the monitor (F.lcd), from black; None = a screen that switches at once"""
     t = (np.arange(int(np.ceil((T_EXP + readout) / dt))) + 0.5) * dt
     L = F.light(t, CODE, CHIP)
+    if lag:
+        L = F.lcd(L, dt, *lag, start=0.0)
     L = L / F.weights(t, dt, L, T_EXP, [0.0]).sum()
     rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
     frames = np.array([blade(rows, cols, START + omega * tk, texture, half) for tk in t])
@@ -178,6 +182,16 @@ def test_run_log_from_the_capture_gui(tmp_path):
     assert timing["late_bits"] == 0 and timing["aborted"] is False
 
 
+def test_run_log_timing_uses_the_sensor_readout_not_the_gui_setting(tmp_path):
+    """with the GUI's readout set to 0 (exposure = code) the sensor still reads out in 64 ms"""
+    log = tmp_path / "coded_rs.json"
+    log.write_text(json.dumps(dict(code=dict(bits=[1, 0, 1, 1], bit_duration_s=0.0625), actual_exposure_us=1066486,
+                                   readout_s=0.0, sensor_readout_s=0.064, frame_boundary_monotonic_ns=1663663357489,
+                                   t0_monotonic_ns=1663685013479)))
+    timing = real.log_timing(log)
+    assert timing["readout_s"] == 0.064 and abs(timing["t0"] - (0.064 + 0.02165599)) < 1e-9
+
+
 DNG = Path(__file__).parents[2] / "illumination/data/coded/coded_20261019_220955.dng"
 
 
@@ -216,8 +230,8 @@ def test_check_bits_flags_a_doubled_bit():
     assert real.check_bits(L, t, CODE, CHIP, 0.04, 0.0) == [i + 1]
 
 
-@pytest.mark.parametrize("black,tau", [(0.0, 0.0), (0.03, 3e-3)])
-def test_fit_readout_recovers_line_time_and_start(black, tau):
+@pytest.mark.parametrize("black,tau,fall", [(0.0, 0.0, None), (0.03, 3e-3, None), (0.0, 0.044, 0.0)])
+def test_fit_readout_recovers_line_time_and_start(black, tau, fall):
     """still scene under the code and under constant light on a rolling shutter, exposure = code length,
     the code starting 21 ms after the first line opens (as coded_illumination.py does)"""
     readout, t0, rows = 0.0632, 0.021, 240
@@ -226,11 +240,11 @@ def test_fit_readout_recovers_line_time_and_start(black, tau):
     dt = CHIP / 64
     t = np.arange(-0.1, T_EXP + 0.3, dt)
     starts = np.arange(rows) * readout / rows
-    shot = lambda c: scene * (F.weights(t, dt, F.lcd(F.light(t, c, CHIP, black, t0), dt, tau) if tau else
+    shot = lambda c: scene * (F.weights(t, dt, F.lcd(F.light(t, c, CHIP, black, t0), dt, tau, fall) if tau else
                                        F.light(t, c, CHIP, black, t0), T_EXP, starts).sum(1))[:, None]
     coded = shot(CODE) * (1 + 0.005 * rng.standard_normal((rows, 160)))
     const = shot("1" * len(CODE)) * (1 + 0.005 * rng.standard_normal((rows, 160)))
-    ro, t0_fit, rms, spread = real.fit_readout(coded, const, CODE, CHIP, T_EXP, 0, black, tau)
+    ro, t0_fit, rms, spread = real.fit_readout(coded, const, CODE, CHIP, T_EXP, 0, black, tau, fall)
     assert abs(ro / readout - 1) < 0.02 and abs(t0_fit - t0) < 1e-3 and rms < 0.2 * spread, (ro, t0_fit, rms, spread)
 
 
@@ -305,7 +319,7 @@ def test_quick_calibration_end_to_end(tmp_path):
     f0, f1 = stills(0.3)
     np.save(tmp_path / "still0.npy", f0)
     np.save(tmp_path / "still1.npy", f1)
-    img, truth = simulate()
+    img, truth = simulate(lag=(real.MONITOR["rise"], real.MONITOR["fall"]))     # the rig's monitor, as auto writes
     np.save(tmp_path / "cap.npy", img + np.random.default_rng(1).normal(0, 0.002, SHAPE))
     (tmp_path / "cap.json").write_text(json.dumps(dict(
         code=dict(bits=[int(c) for c in CODE], bit_duration_s=CHIP), actual_exposure_us=T_EXP * 1e6, readout_s=0.0,
@@ -322,16 +336,17 @@ def test_quick_calibration_end_to_end(tmp_path):
 
 def test_auto_flags_a_camera_bump_between_stills(tmp_path):
     """three stills, the camera nudged 2 px before the middle one: two stills cannot show it, the pairs
-    of three disagree and auto says so"""
+    of three disagree and auto says so. The calibration goes in a folder that does not exist yet"""
     here = Path(__file__).parents[1]
     rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
     rng = np.random.default_rng(3)
     for i in range(3):
         f = blade(rows, cols, START + 0.3 * i) + rng.normal(0, 0.005, SHAPE)
         np.save(tmp_path / f"s{i}.npy", np.roll(f, (2, -2), (0, 1)) if i == 1 else f)
-    out = subprocess.run([sys.executable, "calibrate.py", "auto", tmp_path / "c.json", *[tmp_path / f"s{i}.npy" for i in range(3)],
+    out = subprocess.run([sys.executable, "calibrate.py", "auto", tmp_path / "new/c.json", *[tmp_path / f"s{i}.npy" for i in range(3)],
                           "--deg", str(np.degrees(0.3)), "--out", tmp_path], cwd=here, capture_output=True, text=True, check=True).stdout
     assert "the pairs disagree" in out
+    assert (tmp_path / "new/c.json").exists() and (tmp_path / "new/c_static.npy").exists()
 
 
 def test_wrong_rpm_sign_is_caught_and_corrected(capsys):
@@ -395,3 +410,370 @@ def test_a_file_that_is_not_a_run_log_says_so(tmp_path):
     log.write_text(json.dumps(dict(code=dict(bits=[1], bit_duration_s=0.1), actual_exposure_us=1)))
     with pytest.raises(SystemExit, match="not a complete run log"):
         real.log_timing(log)
+
+
+def test_samples_outside_the_image_carry_no_data():
+    """a polar sample off the image gets a NaN line from unwrap and an all-zero row in A, so it constrains
+    nothing (it used to be read as 0 and fitted as black); samples inside keep their rows"""
+    dt = T_EXP / 40
+    t = (np.arange(40) + 0.5) * dt
+    scene = F.grid((100.0, 63.5), np.arange(R0, R1 + 1.0), START - HALF, START + HALF, 1 / R1, SHAPE, 0, t, dt, OMEGA)
+    lines = F.unwrap(scene, np.ones(SHAPE))[1]
+    off = np.isnan(lines).ravel()
+    assert off.any() and not off.all()
+    A, _ = F.forward_model(scene, F.light(t, CODE, CHIP), T_EXP, lines)
+    rows = np.asarray(abs(A).sum(1)).ravel()
+    assert np.all(rows[off] == 0) and np.all(rows[~off] > 0)
+
+
+def test_dpir_deblur_does_not_depend_on_brightness():
+    """the same noisy capture at 0.15x brightness deblurs to the same image, scaled: raw levels vary with
+    gain and exposure, and DRUNet is not scale-invariant (dpir scales the data to its range)"""
+    img, truth = simulate()
+    noisy = F.sensor(img, 0.5 * 10000 / 0.8, np.random.default_rng(0))
+    rpm = OMEGA * 60 / (2 * np.pi)
+    a = capture.deblur(noisy, calib(), CODE, CHIP, T_EXP, rpm, "global", "dpir")[0]
+    b = capture.deblur(0.15 * noisy, calib(), CODE, CHIP, T_EXP, rpm, "global", "dpir")[0] / 0.15
+    assert blade_psnr(a, truth) > 25
+    assert abs(blade_psnr(a, truth) - blade_psnr(b, truth)) < 0.01
+
+
+def test_blade_noise_reads_the_blade_not_the_dark_background():
+    """shot noise makes the blade noisier than the background; blade_noise must read the blade's, where
+    a whole-image estimate (what DPIR's noise level used to come from) reads the background's"""
+    from skimage.restoration import estimate_sigma
+    clean = np.zeros((200, 200))
+    clean[50:150, 50:150] = 0.8
+    img = clean + np.random.default_rng(0).normal(0, 1, clean.shape) * np.where(clean > 0, 0.02, 0.002)
+    assert abs(F.blade_noise(img, np.ones(clean.shape, bool)) / 0.02 - 1) < 0.1
+    assert estimate_sigma(img) < 0.5 * 0.02
+    few = np.zeros(clean.shape, bool)
+    few[60:70, 60:70] = True                                   # 25 blocks: too few to trust
+    assert F.blade_noise(img, few) is None
+
+
+def test_compare_refuses_a_reference_of_another_size():
+    """a reference still in another camera mode used to score NaN without a word"""
+    with pytest.raises(SystemExit, match="same camera mode"):
+        capture.compare(np.zeros((128, 128)), None, np.zeros((64, 64)))
+
+
+@pytest.mark.parametrize("before", ["none", "no lag"])
+def test_deblur_py_one_command(tmp_path, before):
+    """deblur.py, as in the lab: a stills folder (3 stills turned the same steps apart, then a reference) and
+    a capture folder named with its speed. It calibrates, saves calib.json with the stills, deblurs and scores"""
+    here = Path(__file__).parents[1]
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    rng = np.random.default_rng(0)
+    data = tmp_path / "data"
+    still_dir, cap_dir = data / "gs_stills", data / f"gs_{OMEGA * 60 / (2 * np.pi):.4f}rpm"
+    still_dir.mkdir(parents=True), cap_dir.mkdir()
+    for i, a in enumerate((0.0, 0.3, 0.6, 0.0)):                 # 3 stills 0.3 rad apart, then the reference
+        np.save(still_dir / f"coded_gs_20260101_00000{i}.npy", blade(rows, cols, START + a) + rng.normal(0, 0.005, SHAPE))
+    img, truth = simulate(lag=(real.MONITOR["rise"], real.MONITOR["fall"]))    # the rig's monitor
+    np.save(cap_dir / "coded_gs_20260101_000100.npy", img + rng.normal(0, 0.002, SHAPE))
+    calib_path = tmp_path / "results" / "gs_stills" / "calib.json"        # next to the results, not in the capture folder
+    if before == "no lag":                                           # one from before: a screen that switches at once
+        calib_path.parent.mkdir(parents=True)
+        calib_path.write_text(json.dumps({**calib(), "static": "calib_static.npy"}))
+    (cap_dir / "coded_gs_20260101_000100.json").write_text(json.dumps(dict(
+        code=dict(bits=[int(c) for c in CODE], bit_duration_s=CHIP), actual_exposure_us=T_EXP * 1e6, readout_s=0.0,
+        frame_boundary_monotonic_ns=0, t0_monotonic_ns=0, late_bits=0, aborted=False)))
+    for d in (still_dir, cap_dir):
+        d.chmod(0o555)                                           # read-only, as OneDrive leaves them
+    try:
+        out = subprocess.run([sys.executable, "deblur.py", str(cap_dir), "--stills", str(still_dir), "--steps", "1000",
+                              "--steps-per-rev", str(2 * np.pi / 0.3 * 1000), "--out", str(tmp_path / "results" / "run")],
+                             cwd=here, capture_output=True, text=True)
+    finally:
+        for d in (still_dir, cap_dir):
+            d.chmod(0o755)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert ("treats the monitor as switching instantly" in out.stdout) == (before == "no lag")   # so redone
+    assert calib_path.exists() and "PSNR" in out.stdout                   # calibrated, and scored on the reference
+    saved = json.loads(calib_path.read_text())
+    assert saved["static"] == "calib_static.npy" and saved["monitor"] == real.MONITOR
+    assert "static scene taken out" in out.stdout
+    x = np.load(tmp_path / "results" / "run" / "coded_gs_20260101_000100_global.npy")
+    assert blade_psnr(x, truth) > blade_psnr(img, truth) + 10
+
+
+def test_remove_static_leaves_only_what_moves():
+    """the static scene is fitted on the pixels outside the blade circle and taken out: under half the light a
+    fixed object is half as bright, inside the circle too, and only the moving part is left"""
+    static = np.full(SHAPE, 0.05)
+    static[5:20, 90:120] = 0.6                                 # a bright fixed object outside the circle
+    static[60:70, 30:40] = 0.4                                 # and one inside it, like the rig's bolts
+    moving = np.zeros(SHAPE)
+    moving[40:50, 60:70] = 0.3
+    img = 0.5 * static + 0.01 + moving + np.random.default_rng(0).normal(0, 0.001, SHAPE)
+    out, a, b = real.remove_static(img, static, HUB, 30)
+    assert abs(a - 0.5) < 0.01 and abs(b - 0.01) < 0.002
+    assert np.abs(out - moving).max() < 0.01
+    with pytest.raises(ValueError, match="fills the picture"):
+        real.remove_static(img, static, HUB, 200)
+    with pytest.raises(ValueError, match="calibrate from stills"):
+        real.remove_static(img, static[:-2], HUB, 30)
+
+
+def test_lcd_by_default_is_the_old_single_lag():
+    """F.lcd(L, dt, tau) gives exactly what it did before the rise and fall were split"""
+    def before(L, dt, tau):
+        out, a = np.empty_like(L), 1 - np.exp(-dt / tau)
+        out[0] = L[0]
+        for k in range(1, len(L)):
+            out[k] = out[k - 1] + a * (L[k] - out[k - 1])
+        return out
+    dt = CHIP / 16
+    t = (np.arange(int(np.ceil(T_EXP / dt))) + 0.5) * dt
+    L = F.light(t, CODE, CHIP, black=0.04, t0=0.3 * CHIP)
+    for tau in (1e-3, 3e-3, 0.044):
+        assert np.array_equal(F.lcd(L, dt, tau), before(L, dt, tau))
+        assert np.array_equal(F.lcd(L, dt, tau, tau), before(L, dt, tau))
+
+
+def test_lcd_rises_slowly_and_falls_at_once():
+    """the rig's monitor: a 67 ms flash from black climbs as 1 - exp(-t / rise) and goes dark at once"""
+    dt, rise = 1e-3, 0.044
+    L = np.r_[np.zeros(10), np.ones(67), np.zeros(10)]
+    out = F.lcd(L, dt, rise, 0.0, start=0.0)
+    assert np.allclose(out[10:77], 1 - np.exp(-np.arange(1, 68) * dt / rise), rtol=0, atol=1e-12)
+    assert np.all(out[:10] == 0) and np.all(out[77:] == 0)
+    slow_fall = F.lcd(L, dt, 0.0, rise, start=0.0)                       # and the other way round
+    assert np.all(slow_fall[10:77] == 1)
+    assert np.allclose(slow_fall[77:], np.exp(-np.arange(1, 11) * dt / rise), rtol=0, atol=1e-12)
+    assert np.array_equal(F.lcd(L, dt, 0.0, 0.0), L)                     # 0 = instant
+    on = np.ones(5)                                                      # start: what was shown before
+    assert F.lcd(on, dt, rise)[0] == 1 and F.lcd(on, dt, rise, start=0.0)[0] == pytest.approx(1 - np.exp(-dt / rise))
+
+
+@pytest.mark.parametrize("monitor,lag", [
+    (dict(black=0.0, rise=0.044, fall=0.0, t0=0.0), (0.044, 0.0)),        # what auto writes
+    (dict(black=0.01, tau=0.003, t0=0.0), (0.003, 0.003)),                # fitted by calibrate.py monitor
+    (dict(black=0.0, tau=0.0, t0=0.0), (0.0, 0.0)),                       # a calibration from before
+    ({}, (0.0, 0.0)),
+    (dict(rise=0.044), (0.044, 0.0)),
+    (dict(rise=0.02, fall=0.01, tau=0.5), (0.02, 0.01)),                 # rise and fall win over tau
+    (dict(tau=0.003, fall=0.0), (0.003, 0.0)),                            # each falls back to tau on its own
+])
+def test_monitor_lag_reads_the_calibration(monitor, lag):
+    assert real.monitor_lag(monitor) == lag
+
+
+@pytest.mark.parametrize("monitor", [dict(rise=-0.01), dict(fall=1.0), dict(tau=float("nan")), dict(rise="44 ms"),
+                                     dict(rise=None), None, [0.044]])
+def test_monitor_lag_refuses_nonsense(monitor):
+    with pytest.raises(SystemExit):
+        real.monitor_lag(monitor)
+
+
+def test_brightness_starts_the_lag_from_black():
+    """the screen shows black for the pre-roll, so even the first bit has to brighten"""
+    dt = CHIP / 16
+    t = (np.arange(int(np.ceil(T_EXP / dt))) + 0.5) * dt
+    scene = grid(OMEGA, t, dt)
+    assert CODE[0] == "1"
+    ideal = capture.brightness(scene, CODE, CHIP, T_EXP, calib()["monitor"])
+    slow = capture.brightness(scene, CODE, CHIP, T_EXP, real.MONITOR)
+    assert ideal[0] == ideal.max() and slow[0] < 0.2 * slow.max()
+    for L in (ideal, slow):                                              # both scaled the same way
+        assert F.weights(scene.t, scene.dt, L, T_EXP, [0.0]).sum() == pytest.approx(1)
+
+
+def test_deblur_uses_the_monitors_rise():
+    """a capture under the rig's monitor deblurs better with its rise in the calibration than with a screen that
+    switches at once: the calibration's monitor reaches the forward model"""
+    img, truth = simulate(lag=(real.MONITOR["rise"], real.MONITOR["fall"]))
+    rpm = OMEGA * 60 / (2 * np.pi)
+    ideal = capture.deblur(img, calib(), CODE, CHIP, T_EXP, rpm, "global", "tikhonov", 1e-3)[0]
+    rig = capture.deblur(img, {**calib(), "monitor": dict(real.MONITOR)}, CODE, CHIP, T_EXP, rpm, "global", "tikhonov",
+                         1e-3)[0]
+    assert blade_psnr(rig, truth) > blade_psnr(ideal, truth) + 5, (blade_psnr(rig, truth), blade_psnr(ideal, truth))  # 10 dB
+
+
+def test_auto_writes_the_measured_monitor(tmp_path):
+    """auto writes the rig's monitor over one that switches at once, keeping a measured code start"""
+    here = Path(__file__).parents[1]
+    f0, f1 = stills(0.3)
+    np.save(tmp_path / "s0.npy", f0)
+    np.save(tmp_path / "s1.npy", f1)
+    c = tmp_path / "c.json"
+    auto = [sys.executable, "calibrate.py", "auto", c, tmp_path / "s0.npy", tmp_path / "s1.npy", "--deg",
+            str(np.degrees(0.3)), "--out", tmp_path]
+    subprocess.run(auto, cwd=here, capture_output=True, check=True)
+    assert json.loads(c.read_text())["monitor"] == real.MONITOR
+    c.write_text(json.dumps({**calib(), "monitor": dict(black=0.0, tau=0.0, t0=0.021)}))
+    subprocess.run(auto, cwd=here, capture_output=True, check=True)
+    assert json.loads(c.read_text())["monitor"] == {**real.MONITOR, "t0": 0.021}
+
+
+def test_brightness_with_the_code_starting_before_the_exposure():
+    """t0 < 0 (a rolling shutter's code can start before the first line opens): the screen has been brightening
+    for -t0 already. Same as the lag run on a long grid from well before the code; t0 = 0 is unchanged"""
+    dt = CHIP / 16
+    t = (np.arange(int(np.ceil(T_EXP / dt))) + 0.5) * dt
+    scene = grid(OMEGA, t, dt)
+    rise, fall = real.MONITOR["rise"], real.MONITOR["fall"]
+    for t0 in (-0.3 * CHIP, -2.5 * CHIP, 0.0, 0.4 * CHIP):
+        k = 200                                                          # samples of black before the grid
+        long = np.r_[t[0] - dt * np.arange(k, 0, -1), t]
+        ref = F.lcd(F.light(long, CODE, CHIP, 0.0, t0), dt, rise, fall, start=0.0)[k:]
+        ref /= F.weights(t, dt, ref, T_EXP, [0.0]).sum()
+        got = capture.brightness(scene, CODE, CHIP, T_EXP, {**real.MONITOR, "t0": t0})
+        assert np.allclose(got, ref, rtol=0, atol=1e-12), t0
+    before = F.lcd(F.light(t, CODE, CHIP, 0.0, 0.0), dt, rise, fall, start=0.0)     # the lag as first written
+    assert np.array_equal(capture.brightness(scene, CODE, CHIP, T_EXP, real.MONITOR),
+                          before / F.weights(t, dt, before, T_EXP, [0.0]).sum())
+
+
+def test_scripts_warn_about_a_calibration_without_the_lag(tmp_path):
+    """global-shutter.py and the rolling shutter scripts take a calibration as given: one from before the
+    measured monitor is flagged, not silently deblurred with a screen that switches at once"""
+    here = Path(__file__).parents[1]
+    img, _ = simulate()
+    np.save(tmp_path / "cap.npy", img)
+    for monitor, warned in ((calib()["monitor"], True), (dict(real.MONITOR), False)):
+        c = tmp_path / "c.json"
+        c.write_text(json.dumps({**calib(), "monitor": monitor}))
+        out = subprocess.run([sys.executable, "global-shutter.py", tmp_path / "cap.npy", "--calib", c, "--rpm", "1",
+                              "--check", "--out", tmp_path], cwd=here, capture_output=True, text=True, check=True)
+        assert ("switching at once" in out.stdout) == warned
+
+
+def fan(rows, cols, angle, mark=True):
+    """three look-alike blades 120 deg apart (the rig's), told apart only by a dark patch near the tip of the
+    first, as the rig's are only by their letters"""
+    img = sum(blade(rows, cols, angle + k * 2 * np.pi / 3, texture=False) - 0.05 for k in range(3)) + 0.05
+    if mark:
+        a = angle
+        rr, cc = HUB[0] - 48 * np.sin(a), HUB[1] + 48 * np.cos(a)
+        img = np.where(np.hypot(rows - rr, cols - cc) < 5, 0.1, img)
+    return img
+
+
+def fan_capture(angle=START, omega=OMEGA, dt=CHIP / 40):
+    """the fan under the code, global shutter, as simulate()"""
+    t = (np.arange(int(np.ceil(T_EXP / dt))) + 0.5) * dt
+    L = F.light(t, CODE, CHIP)
+    L = L / F.weights(t, dt, L, T_EXP, [0.0]).sum()
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    w = F.weights(t, dt, L, T_EXP, [0.0])[0]
+    return sum(wk * fan(rows, cols, angle + omega * tk) for wk, tk in zip(w, t)), t, w
+
+
+def test_blade_angle_tells_look_alike_blades_apart():
+    """the whole capture, every blade, against the whole still blurred the same way: the marked blade lands
+    on the marked blade, not on a look-alike 120 deg off"""
+    img, t, w = fan_capture()
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    r = np.arange(R0, R1 + 1.0)
+    for turn in (2.0, -1.0):
+        ref = fan(rows, cols, START + turn)                         # the still, at another angle
+        angle, margin = real.blade_angle(ref, img, HUB, r, OMEGA, t, w)
+        off = (angle - turn + np.pi) % (2 * np.pi) - np.pi
+        assert abs(off) < np.radians(1.5) and margin > 1.02, (np.degrees(off), margin)
+
+
+def test_align_near_stays_on_that_blade():
+    """align, told roughly where the blade is, keeps to it even where a look-alike matches about as well"""
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    x, ref = fan(rows, cols, START, mark=False), fan(rows, cols, START + 1.0, mark=False)
+    r, th = np.arange(R0, R1 + 1.0), np.arange(START - 0.5, START + 0.5, 1 / R1)
+    for k in (0, 1, 2):                                             # each of the three look-alikes on request
+        want = 1.0 + k * 2 * np.pi / 3
+        got = real.align(ref, x, HUB, r, th, near=want + 0.05)[1]
+        assert abs((got - want + np.pi) % (2 * np.pi) - np.pi) < np.radians(1), (k, np.degrees(got))
+
+
+def test_speed_from_blur_finds_the_speed():
+    """the speed from the blur of the still, searched from guesses 15% off, within 0.5% of the true one
+    (nearest-step blur on bilinear samples read 1.2% low here). Only for these two still angles: on this
+    small blade, whose 1 px edges turn into a different pixel staircase at every angle, other angles move
+    the estimate by up to 9%. On the real captures (5, 8 rpm) the three stills agreed within 1.2%"""
+    img, _ = simulate()
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    rpm = OMEGA * 60 / (2 * np.pi)
+    for guess, turn in ((1.15, 1.0), (0.85, -2.0)):
+        ref = blade(rows, cols, START + turn)                       # the stopped blade, somewhere else
+        est, edge = capture.speed_from_blur(img, calib(), ref, CODE, CHIP, T_EXP, guess * rpm)
+        assert not edge and abs(est / rpm - 1) < 0.005, (guess, turn, est / rpm)
+
+
+@pytest.mark.skipif(subprocess.run(["which", "tesseract"], capture_output=True).returncode != 0,
+                    reason="tesseract not installed")
+def test_read_letter_reads_the_card():
+    """an upright letter on a card, with dark background and card edges round it, reads as that letter; a blank
+    card reads as nothing"""
+    from PIL import Image, ImageDraw, ImageFont
+    font = ImageFont.load_default(size=60)
+    for ch in "ABC":
+        im = Image.new("L", (85, 85), 10)                           # background
+        d = ImageDraw.Draw(im)
+        d.rectangle((8, 6, 80, 78), fill=230)                       # the card, cut by the square's edge
+        d.text((44, 42), ch, fill=20, font=font, anchor="mm")
+        assert ocr.read_letter(np.asarray(im, float) / 255) == ch
+    assert ocr.read_letter(np.full((85, 85), 0.9)) == ""
+
+
+def test_card_crop_turns_the_blade_to_point_down():
+    """a bright spot further out along the blade than the card's centre ends up straight below it"""
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    thc, rc = 0.7, 40.0
+    spot = np.hypot(rows - (HUB[0] - 52 * np.sin(thc)), cols - (HUB[1] + 52 * np.cos(thc))) < 2
+    c = ocr.card_crop(spot.astype(float), HUB, rc, thc, half=20)
+    r, k = np.unravel_index(np.argmax(c), c.shape)
+    assert abs(k - 20) <= 1 and r > 20 + 9, (r, k)
+
+
+@pytest.mark.parametrize("code,chip,sign", [(CODE, CHIP, -1), ("1", T_EXP, 1), ("1", T_EXP, -1)])
+def test_speed_from_blur_steady_light_and_either_way(code, chip, sign):
+    """steady light (one bit as long as the exposure: the sub-frames are then set by the speed, the case that
+    made the match jump between candidate speeds) and the fan turning either way: never off the search, the
+    parabola never more than a step, coded within 0.5%, steady within 3%"""
+    omega = sign * OMEGA
+    dt = CHIP / 40
+    t = (np.arange(int(np.ceil(T_EXP / dt))) + 0.5) * dt
+    L = F.light(t, code, chip)
+    w = F.weights(t, dt, L / F.weights(t, dt, L, T_EXP, [0.0]).sum(), T_EXP, [0.0])[0]
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    img = sum(wk * blade(rows, cols, START + omega * tk) for wk, tk in zip(w, t))
+    rpm = omega * 60 / (2 * np.pi)
+    est, edge = capture.speed_from_blur(img, calib(), blade(rows, cols, START + 1.0), code, chip, T_EXP, 1.1 * rpm)
+    assert not edge and abs(est / rpm - 1) < (0.005 if code == CODE else 0.03), est / rpm
+
+
+def test_steady_light_keeps_the_given_direction(capsys):
+    """steady light cannot show which way the fan turns, so the deblur never flips --rpm's sign on it"""
+    dt = CHIP / 40
+    t = (np.arange(int(np.ceil(T_EXP / dt))) + 0.5) * dt
+    L = F.light(t, "1", T_EXP)
+    w = F.weights(t, dt, L / F.weights(t, dt, L, T_EXP, [0.0]).sum(), T_EXP, [0.0])[0]
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    img = sum(wk * blade(rows, cols, START + OMEGA * tk) for wk, tk in zip(w, t))
+    rpm = OMEGA * 60 / (2 * np.pi)
+    for given in (rpm, -rpm):
+        used = capture.deblur(img, calib(), "1", T_EXP, T_EXP, given, "global", "tikhonov", 1e-3)[2]
+        assert np.sign(used) == np.sign(given)
+    assert "cannot be told" in capsys.readouterr().out
+
+
+def test_compare_with_the_capture_scores_the_right_blade(monkeypatch):
+    """compare given the capture scores the deblurred blade against the blade real.blade_angle names (which
+    tells look-alikes apart, test above), not whichever blade of the still best matches the deblur: here the
+    right one, then a look-alike it is told to use, which align on its own would not pick"""
+    img, t, w = fan_capture()
+    rows, cols = np.mgrid[:SHAPE[0], :SHAPE[1]].astype(float)
+    rpm = OMEGA * 60 / (2 * np.pi)
+    cal = {**calib(), "arc_deg": list(np.degrees([START - 0.6, START + 0.25 + OMEGA * T_EXP + 0.1]))}
+    x, scene, _ = capture.deblur(img, cal, CODE, CHIP, T_EXP, rpm, "global", "tikhonov", 1e-3)
+    for turn in (2.0, -1.0):
+        capture.compare(x, scene, fan(rows, cols, START + turn), img)
+        # the turned still against the fan with its mark on the capture's blade, and on each look-alike
+        err = [np.abs(scene.truth - fan(rows, cols, START + k * 2 * np.pi / 3))[scene.mask].mean() for k in (0, 1, 2)]
+        assert np.argmin(err) == 0 and err[0] < 0.5 * min(err[1:]), (turn, err)
+        assert scene.blade_margin > 1.02
+    turn = 2.0
+    monkeypatch.setattr(real, "blade_angle", lambda *a: (turn + 2 * np.pi / 3, 9.0))      # names a look-alike
+    capture.compare(x, scene, fan(rows, cols, START + turn), img)
+    err = [np.abs(scene.truth - fan(rows, cols, START + k * 2 * np.pi / 3))[scene.mask].mean() for k in (0, 1, 2)]
+    assert np.argmin(err) != 0 and scene.blade_margin == 9.0, err
