@@ -10,6 +10,7 @@
 ![Arduino](https://img.shields.io/badge/Arduino-stepper%20fan-00878F?logo=arduino&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/deblur-DPIR%20(deepinv)-EE4C2C?logo=pytorch&logoColor=white)
 ![Course](https://img.shields.io/badge/USYD-MECH5720%20Group%2010-1f6feb)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 <img src="docs/img/deblur.gif" width="640" alt="A letter card on a fan blade spinning at 8 rpm. Under coded light the blurred capture deblurs to a readable C; under steady light it stays unreadable.">
 
@@ -313,3 +314,7 @@ controlled via a stepper motor, so that the speed can be controlled and recorded
 - A. Agrawal, Y. Xu. *Coded Exposure Deblurring: Optimized Codes for PSF Estimation and Invertibility.* CVPR 2009.
 - J. Gu, Y. Hitomi, T. Mitsunaga, S. Nayar. *Coded Rolling Shutter Photography: Flexible Space-Time Sampling.* ICCP 2010.
 - C.-K. Liang, L.-W. Chang, H. H. Chen. *Analysis and Compensation of Rolling Shutter Effect.* IEEE TIP 17(8), 2008.
+
+## License
+
+[MIT](LICENSE). The DPIR denoiser weights are downloaded at run time by `deepinv` and keep their own license.
